@@ -18,7 +18,7 @@ authenticator = stauth.Authenticate(
     config['cookie']['name'],
     config['cookie']['key'],
     config['cookie']['expiry_days'],
-    config['preauthorized']
+    config['pre-authorized']
 )
 
 # Renderizar Login
