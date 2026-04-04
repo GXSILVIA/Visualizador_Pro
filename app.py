@@ -48,12 +48,14 @@ if st.session_state.get("authentication_status"):
         if os.path.exists(ruta):
             # CARGA Y LIMPIEZA INMEDIATA DE DUPLICADOS EN EL ARCHIVO DEL ESTADO
             gdf = gpd.read_file(ruta)
+            
+            # ELIMINAR COLUMNAS DUPLICADAS (Resuelve el ValueError de raíz)
             gdf = gdf.loc[:, ~gdf.columns.duplicated()].copy()
             
             posibles = ['d_cp', 'CP', 'codigopostal', 'CODIGO_POSTAL']
-            col_json = next((c for c in posibles if c in gdf.columns), gdf.columns)
+            col_json = next((c for c in posibles if c in gdf.columns), gdf.columns[0])
             
-            # Asegurar que sea una serie única para evitar el ValueError
+            # Asegurar que sea una serie única para evitar errores de longitud
             col_data = gdf[col_json]
             if isinstance(col_data, pd.DataFrame):
                 col_data = col_data.iloc[:, 0]
@@ -79,14 +81,14 @@ if st.session_state.get("authentication_status"):
         c1, c2 = st.columns(2)
         for i in range(6):
             target = c1 if i < 3 else c2
-            f_checks.append(target.checkbox(labels[i], value=True, key=f"v_range_f3_{i}"))
+            f_checks.append(target.checkbox(labels[i], value=True, key=f"v_range_f4_{i}"))
         
         st.markdown("---")
         # ETIQUETAS NEGRAS PARA MAPA BLANCO
         ver_nombres = st.toggle("🏷️ Mostrar nombres en negro", value=False)
         archivo_excel = st.file_uploader("📂 Sube tu Excel", type=["xlsx"])
         
-        # BOTÓN DE CARGA: Indispensable para archivos pesados
+        # BOTÓN DE CARGA: Indispensable para archivos pesados de 300MB
         btn_procesar = st.button("🚀 Procesar Datos", use_container_width=True)
 
     # --- 3. MAPA ---
@@ -120,18 +122,18 @@ if st.session_state.get("authentication_status"):
                                 ).add_to(m)
                                 if ver_nombres:
                                     centro = fila['geometry'].centroid
-                                    # ETIQUETAS NEGRAS CON FONDO BLANCO SÓLIDO
+                                    # ETIQUETAS NEGRAS CON FONDO BLANCO SÓLIDO Y NEGRITA 900
                                     folium.Marker([centro.y, centro.x], 
                                         icon=folium.features.DivIcon(html=f'''
-                                            <div style="font-size:7pt; font-weight:900; color:black; 
+                                            <div style="font-size:7.5pt; font-weight:900; color:black; 
                                             background-color:rgba(255,255,255,0.95); border:1px solid black; 
-                                            text-align:center; width:95px; border-radius:2px;">
+                                            text-align:center; width:100px; border-radius:2px;">
                                                 {fila.get("NOMBRE","")}
                                             </div>''')
                                     ).add_to(m)
 
                 # Renderizar con llave única para forzar limpieza de memoria
-                st_folium(m, width="100%", height=700, key=f"map_vpro_fix_{hash(archivo_sel)}_{modo}")
+                st_folium(m, width="100%", height=700, key=f"map_vpro_fix_v4_{hash(archivo_sel)}_{modo}")
 
                 # BOTÓN DE DESCARGA
                 st.download_button(label="💾 Descargar Mapa Actual (HTML)", data=m._repr_html_(), file_name=f"Visualizador_{archivo_sel}.html", mime="text/html", use_container_width=True)
