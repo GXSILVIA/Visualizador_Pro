@@ -25,12 +25,26 @@ authenticator = stauth.Authenticate(
     config['cookie']['expiry_days']
 )
 
-# Renderizar Login
-name, authentication_status, username = authenticator.login(location='main')
+# NUEVO FORMATO: Solo devuelve el status y no usa 'location'
+authentication_status = authenticator.login()
 
+if st.session_state["authentication_status"]:
+    # Obtener datos de la sesión actual
+    name = st.session_state["name"]
+    username = st.session_state["username"]
+    
+    # --- TODO TU CÓDIGO DE VISUALIZADOR PRO VA AQUÍ ---
+    st.sidebar.write(f'Bienvenido **{name}**')
+    authenticator.logout('Cerrar Sesión', 'sidebar')
+    
+    # Aquí siguen tus funciones y lógica del mapa...
 
-if authentication_status:
-    st.set_page_config(page_title="Visualizador Pro", layout="wide")
+elif st.session_state["authentication_status"] is False:
+    st.error('Usuario o contraseña incorrectos')
+elif st.session_state["authentication_status"] is None:
+    st.warning('Por favor, introduce tu usuario y contraseña')
+    st.info('Soporte: gxsilvia@outlook.com')
+
     
     # Barra lateral
     st.sidebar.write(f'Bienvenido **{name}**')
