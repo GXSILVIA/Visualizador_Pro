@@ -25,7 +25,7 @@ if st.session_state.get("authentication_status"):
     authenticator.logout('Cerrar Sesión', 'sidebar')
     st.title("📍 Visualizador Pro")
 
-    # --- 2. COLORES NEÓN (BRILLO POR CONTRASTE) ---
+    # --- 2. COLORES NEÓN ---
     COLORS = {
         0: "#FFFFFF", 1: "#FFFF00", 2: "#FFCC00", 
         3: "#FF5555", 4: "#FF0000", 5: "#770000"
@@ -39,7 +39,7 @@ if st.session_state.get("authentication_status"):
 
     def normalizar_columnas(df):
         df.columns = df.columns.str.strip().str.upper()
-        mapeo = {'LATITUD': 'LAT', 'LONGITUD': 'LON', 'CODIGO POSTAL': 'CP', 'VOLUMEN': 'VOLUMEN', 'NOMBRE': 'NOMBRE', 'RADIO': 'RADIO'}
+        mapeo = {'LATITUD': 'LAT', 'LONGITUD': 'LON', 'CODIGO POSTAL': 'CP', 'CP': 'CP', 'VOLUMEN': 'VOLUMEN', 'NOMBRE': 'NOMBRE', 'RADIO': 'RADIO'}
         return df.rename(columns=mapeo)
 
     @st.cache_data
@@ -47,10 +47,18 @@ if st.session_state.get("authentication_status"):
         ruta = f"mapas/{nombre_archivo}"
         if os.path.exists(ruta):
             gdf = gpd.read_file(ruta)
+            # LIMPIEZA CRÍTICA: Eliminar columnas duplicadas que causan el AttributeError
             gdf = gdf.loc[:, ~gdf.columns.duplicated()].copy()
+            
             posibles = ['d_cp', 'CP', 'codigopostal', 'CODIGO_POSTAL']
-            col_json = next((c for c in posibles if c in gdf.columns), gdf.columns)
-            gdf[col_json] = gdf[col_json].astype(str).str.zfill(5)
+            col_json = next((c for c in posibles if c in gdf.columns), gdf.columns[0])
+            
+            # Asegurar que los datos sean una serie única y no un dataframe
+            col_data = gdf[col_json]
+            if isinstance(col_data, pd.DataFrame):
+                col_data = col_data.iloc[:, 0]
+                
+            gdf[col_json] = col_data.astype(str).str.zfill(5)
             return gdf, col_json
         return None, None
 
@@ -82,8 +90,7 @@ if st.session_state.get("authentication_status"):
     # --- 4. MAPA ---
     with col_mapa:
         if archivo_excel and btn_procesar:
-            # Spinner discreto para no oscurecer toda la pantalla
-            with st.spinner("Procesando información geográfica..."):
+            with st.spinner("Generando visualización..."):
                 df = pd.read_excel(archivo_excel)
                 df = normalizar_columnas(df)
                 df['RANGO_ID'] = df['VOLUMEN'].apply(asignar_rango)
@@ -91,7 +98,7 @@ if st.session_state.get("authentication_status"):
                 activos = [i for i, v in enumerate(f_checks) if v]
                 df_filtrado = df[df['RANGO_ID'].isin(activos)].copy()
 
-                # MAPA OSCURO PARA QUE BRILLEN LOS COLORES NEÓN
+                # Mapa base oscuro para resaltar los colores neón
                 m = folium.Map(location=[19.4326, -99.1332], zoom_start=6, tiles="CartoDB.DarkMatter")
 
                 if modo == "Coordenadas (Puntos)" and not df_filtrado.empty:
@@ -103,14 +110,14 @@ if st.session_state.get("authentication_status"):
                             color="#FFF", weight=0.5, fill=True, fill_color=color_marker, fill_opacity=0.9,
                             tooltip=f"<b>{fila.get('NOMBRE','')}</b><br>Vol: {fila['VOLUMEN']}"
                         ).add_to(m)
+                        
                         if ver_nombres:
-                            # ETIQUETAS EN NEGRO CON FONDO BLANCO
                             folium.Marker(
                                 [fila['LAT'], fila['LON']], 
                                 icon=folium.features.DivIcon(html=f'''
                                     <div style="font-size:8pt; font-weight:bold; color:black; 
                                     background-color:white; border:1px solid black; padding:2px; 
-                                    border-radius:3px; width:120px; text-align:center;">
+                                    border-radius:3px; width:130px; text-align:center;">
                                         {fila.get("NOMBRE","")}
                                     </div>''')
                             ).add_to(m)
@@ -120,33 +127,35 @@ if st.session_state.get("authentication_status"):
                     if gdf_est is not None:
                         df_filtrado['CP'] = df_filtrado['CP'].astype(str).str.zfill(5)
                         merged = gdf_est.merge(df_filtrado, left_on=col_cp_json, right_on='CP')
+                        
                         if not merged.empty:
                             m.location = [merged.geometry.centroid.y.mean(), merged.geometry.centroid.x.mean()]
                             for _, fila in merged.iterrows():
                                 color_poly = COLORS.get(fila['RANGO_ID'], "#888")
                                 folium.GeoJson(
                                     fila['geometry'],
-                                    style_function=lambda x, c=color_poly: {'fillColor': c, 'color': 'white', 'weight': 0.5, 'fillOpacity': 0.85},
+                                    style_function=lambda x, c=color_poly: {
+                                        'fillColor': c, 'color': 'white', 'weight': 0.5, 'fillOpacity': 0.85
+                                    },
                                     tooltip=f"<b>CP: {fila['CP']}</b><br>Vol: {fila['VOLUMEN']}"
                                 ).add_to(m)
+                                
                                 if ver_nombres:
                                     centro = fila['geometry'].centroid
-                                    # ETIQUETAS EN NEGRO CON SOMBRA BLANCA PARA MAPA OSCURO
                                     folium.Marker(
                                         [centro.y, centro.x], 
                                         icon=folium.features.DivIcon(html=f'''
                                             <div style="font-size:7pt; font-weight:bold; color:black; 
-                                            background-color:rgba(255,255,255,0.8); padding:1px; 
-                                            border-radius:2px; text-align:center; width:80px;">
+                                            background-color:rgba(255,255,255,0.9); padding:1px; 
+                                            border-radius:2px; text-align:center; width:90px; border:0.5px solid black;">
                                                 {fila.get("NOMBRE","")}
                                             </div>''')
                                     ).add_to(m)
 
-            # MOSTRAR MAPA
-            # La key dinámica asegura que se limpie el mapa anterior al cambiar filtros
-            st_folium(m, width="100%", height=700, key=f"map_{hash(tuple(f_checks))}_{ver_nombres}_{modo}")
+            # Renderizado del mapa con llave dinámica para forzar refresco
+            st_folium(m, width="100%", height=700, key=f"map_pro_{hash(tuple(f_checks))}_{ver_nombres}")
 
-            # BOTÓN DE DESCARGA SIEMPRE DISPONIBLE TRAS PROCESAR
+            # Botón de Descarga
             st.download_button(
                 label="💾 Descargar Mapa Actual (HTML)",
                 data=m._repr_html_(),
@@ -155,7 +164,7 @@ if st.session_state.get("authentication_status"):
                 use_container_width=True
             )
         else:
-            st.info("👋 Selecciona tu archivo Excel y presiona 'Procesar' para visualizar.")
+            st.info("👋 Sube tu archivo Excel y presiona 'Procesar Datos' para comenzar.")
 
 elif st.session_state.get("authentication_status") is False:
     st.error('Acceso denegado')
