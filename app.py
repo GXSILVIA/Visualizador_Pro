@@ -13,11 +13,7 @@ from streamlit_folium import st_folium
 with open('config.yaml') as file:
     config = yaml.load(file, Loader=SafeLoader)
 
-# --- 1. CONFIGURACIÓN DE SEGURIDAD ACTUALIZADA ---
-with open('config.yaml') as file:
-    config = yaml.load(file, Loader=SafeLoader)
-
-# NUEVO FORMATO: Sin pre_authorized para evitar el DeprecationError
+# Inicializar el autenticador (Nueva versión 2026)
 authenticator = stauth.Authenticate(
     config['credentials'],
     config['cookie']['name'],
@@ -25,34 +21,27 @@ authenticator = stauth.Authenticate(
     config['cookie']['expiry_days']
 )
 
-# NUEVO FORMATO: Solo devuelve el status y no usa 'location'
-authentication_status = authenticator.login()
+# Renderizar el formulario de Login
+authenticator.login()
 
-if st.session_state["authentication_status"]:
-    # Obtener datos de la sesión actual
+# Verificamos el estado de autenticación desde el estado de la sesión de Streamlit
+if st.session_state.get("authentication_status"):
+    
+    # 1. CONFIGURACIÓN DE LA PÁGINA (Debe ser lo primero tras el login exitoso)
+    st.set_page_config(page_title="Visualizador Pro", layout="wide")
+    
+    # 2. EXTRAER DATOS DE LA SESIÓN PARA EVITAR NAMEERROR
     name = st.session_state["name"]
-    username = st.session_state["username"]
     
-    # --- TODO TU CÓDIGO DE VISUALIZADOR PRO VA AQUÍ ---
-    st.sidebar.write(f'Bienvenido **{name}**')
-    authenticator.logout('Cerrar Sesión', 'sidebar')
-    
-    # Aquí siguen tus funciones y lógica del mapa...
-
-elif st.session_state["authentication_status"] is False:
-    st.error('Usuario o contraseña incorrectos')
-elif st.session_state["authentication_status"] is None:
-    st.warning('Por favor, introduce tu usuario y contraseña')
-    st.info('Soporte: gxsilvia@outlook.com')
-
-    
-    # Barra lateral
+    # Barra lateral de bienvenida y logout
     st.sidebar.write(f'Bienvenido **{name}**')
     authenticator.logout('Cerrar Sesión', 'sidebar')
 
     st.title("📍 Visualizador Pro")
 
-    # Colores y lógica de rangos
+    # --- LÓGICA DE LA APLICACIÓN ---
+    
+    # Colores oficiales por rango
     COLORS = {0:"#FFFFFF", 1:"#FFFF00", 2:"#FFA500", 3:"#FF7777", 4:"#FF0000", 5:"#800000"}
 
     def asignar_rango(v):
@@ -62,6 +51,7 @@ elif st.session_state["authentication_status"] is None:
         except: return 0
 
     def normalizar_columnas(df):
+        """Limpia encabezados para aceptar variaciones de nombre"""
         df.columns = df.columns.str.strip().str.upper()
         mapeo = {
             'LATITUD': 'LAT', 'LAT': 'LAT', 'LONGITUD': 'LON', 'LON': 'LON', 'LNG': 'LON',
@@ -72,22 +62,25 @@ elif st.session_state["authentication_status"] is None:
 
     @st.cache_data
     def cargar_capa_estado(nombre_archivo):
+        """Carga el archivo GeoJSON desde la carpeta mapas/"""
         ruta = f"mapas/{nombre_archivo}"
         if os.path.exists(ruta):
             gdf = gpd.read_file(ruta)
+            # Buscar columna de CP en el JSON (d_cp, CP, etc)
             posibles_cols = ['d_cp', 'CP', 'codigopostal', 'CODIGO_POSTAL']
             col_json = next((c for c in posibles_cols if c in gdf.columns), gdf.columns[0])
             gdf[col_json] = gdf[col_json].astype(str).str.zfill(5)
             return gdf, col_json
         return None, None
 
-    # --- 2. INTERFAZ DE CONTROL ---
+    # --- 3. INTERFAZ DE CONTROL (COLUMNA DERECHA) ---
     col_mapa, col_controles = st.columns([3.5, 1])
 
     with col_controles:
         st.subheader("⚙️ Configuración")
         modo = st.radio("Método de Ubicación", ["Coordenadas (Puntos)", "Código Postal (Polígonos)"])
         
+        # Leer archivos de la carpeta mapas/
         if os.path.exists('mapas'):
             archivos_geo = [f for f in os.listdir('mapas') if f.endswith(('.geojson', '.json'))]
         else:
@@ -103,7 +96,7 @@ elif st.session_state["authentication_status"] is None:
         st.info("🖱️ Pasa el mouse por el mapa para ver el Volumen.")
         archivo_excel = st.file_uploader("📂 Sube tu Excel", type=["xlsx"])
 
-    # --- 3. MAPA Y PROCESAMIENTO ---
+    # --- 4. MAPA Y PROCESAMIENTO (COLUMNA IZQUIERDA) ---
     with col_mapa:
         if archivo_excel:
             df = pd.read_excel(archivo_excel)
@@ -149,19 +142,25 @@ elif st.session_state["authentication_status"] is None:
                                 tooltip=folium.Tooltip(tooltip_html)
                             ).add_to(m)
                     else:
-                        st.warning(f"No hay datos para {archivo_sel} en el Excel.")
+                        st.warning(f"No hay datos para {archivo_sel} en este Excel.")
 
+            # Renderizado final del mapa
             st_folium(m, width="100%", height=700, key="mapa_final")
 
             # Botón de Descarga
             map_html = io.BytesIO()
             m.save(map_html, close_file=False)
-            st.download_button(label="💾 Descargar Mapa HTML", data=map_html.getvalue(), file_name=f"Visualizador_{archivo_sel}.html", mime="text/html")
+            st.download_button(
+                label="💾 Descargar Mapa Interactivo (HTML)",
+                data=map_html.getvalue(),
+                file_name=f"Visualizador_{archivo_sel}.html",
+                mime="text/html"
+            )
         else:
-            st.info("👋 Por favor sube un archivo Excel para comenzar.")
+            st.info("👋 Bienvenido Administrador. Por favor sube un Excel para comenzar.")
 
-elif authentication_status is False:
+elif st.session_state.get("authentication_status") is False:
     st.error('Usuario o contraseña incorrectos')
-elif authentication_status is None:
+elif st.session_state.get("authentication_status") is None:
     st.warning('Por favor, introduce tu usuario y contraseña')
     st.info('Soporte: gxsilvia@outlook.com')
