@@ -1,0 +1,9 @@
+streamlit
+pandas
+folium
+streamlit-folium
+geopandas
+openpyxl
+pyyaml
+bcrypt
+streamlit-authenticator

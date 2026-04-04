@@ -1,0 +1,15 @@
+credentials:
+  usernames:
+    amzl.hub:
+      email: gxsilvia@outlook.com
+      name: Administrador AMZL
+      password: '$2b$12$UpjLUN2jdDqP5QsbjiG9H.royriH.urgbzon7cXKG.PU6fa2wFhbO'
+cookie:
+  expiry_days: 30
+  key: amzl_signature
+  name: amzl_cookie
+preauthorized:
+  emails:
+    - gxsilvia@outlook.com
+
+
