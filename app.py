@@ -21,16 +21,19 @@ authenticator = stauth.Authenticate(
 authenticator.login()
 
 if st.session_state.get("authentication_status"):
-    # Configuración de página (Debe ser lo primero)
     st.set_page_config(page_title="Visualizador Pro", layout="wide")
-    name = st.session_state["name"]
     
-    st.sidebar.write(f'Bienvenido **{name}**')
+    # Barra lateral
+    st.sidebar.write(f'Bienvenido **{st.session_state["name"]}**')
     authenticator.logout('Cerrar Sesión', 'sidebar')
     st.title("📍 Visualizador Pro")
 
-    # --- 2. LÓGICA Y COLORES ---
-    COLORS = {0:"#FFFFFF", 1:"#FFFF00", 2:"#FFA500", 3:"#FF7777", 4:"#FF0000", 5:"#800000"}
+    # --- 2. COLORES BRILLANTES Y LÓGICA ---
+    # Colores ajustados para mayor visibilidad
+    COLORS = {
+        0: "#FFFFFF", 1: "#FFFF33", 2: "#FFCC00", 
+        3: "#FF6666", 4: "#FF0000", 5: "#990000"
+    }
 
     def asignar_rango(v):
         try:
@@ -40,7 +43,7 @@ if st.session_state.get("authentication_status"):
 
     def normalizar_columnas(df):
         df.columns = df.columns.str.strip().str.upper()
-        mapeo = {'LATITUD': 'LAT', 'LONGITUD': 'LON', 'CODIGO POSTAL': 'CP', 'VOLUMEN': 'VOLUMEN', 'NOMBRE': 'NOMBRE', 'RADIO': 'RADIO'}
+        mapeo = {'LATITUD': 'LAT', 'LONGITUD': 'LON', 'CODIGO POSTAL': 'CP', 'CP': 'CP', 'VOLUMEN': 'VOLUMEN', 'NOMBRE': 'NOMBRE', 'RADIO': 'RADIO'}
         return df.rename(columns=mapeo)
 
     @st.cache_data
@@ -48,8 +51,8 @@ if st.session_state.get("authentication_status"):
         ruta = f"mapas/{nombre_archivo}"
         if os.path.exists(ruta):
             gdf = gpd.read_file(ruta)
-            posibles_cols = ['d_cp', 'CP', 'codigopostal', 'CODIGO_POSTAL']
-            col_json = next((c for c in posibles_cols if c in gdf.columns), gdf.columns[0])
+            posibles = ['d_cp', 'CP', 'codigopostal']
+            col_json = next((c for c in posibles if c in gdf.columns), gdf.columns[0])
             gdf[col_json] = gdf[col_json].astype(str).str.zfill(5)
             return gdf, col_json
         return None, None
@@ -61,22 +64,21 @@ if st.session_state.get("authentication_status"):
         st.subheader("⚙️ Configuración")
         modo = st.radio("Método de Ubicación", ["Coordenadas (Puntos)", "Código Postal (Polígonos)"])
         
-        archivos_geo = [f for f in os.listdir('mapas') if f.endswith(('.geojson', '.json'))] if os.path.exists('mapas') else []
-        archivo_sel = st.selectbox("Estado a visualizar", sorted(archivos_geo))
+        archivos = [f for f in os.listdir('mapas') if f.endswith(('.geojson', '.json'))] if os.path.exists('mapas') else []
+        archivo_sel = st.selectbox("Estado a visualizar", sorted(archivos))
         
         st.markdown("---")
         st.subheader("📊 Filtros de Rango")
-        
-        # Organización 3 y 3
+        # Organización en 2 columnas (3 y 3)
         labels = ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R40+"]
         f_checks = []
         c1, c2 = st.columns(2)
         for i in range(6):
-            target_col = c1 if i < 3 else c2
-            f_checks.append(target_col.checkbox(labels[i], value=True, key=f"f_{i}"))
+            col_target = c1 if i < 3 else c2
+            f_checks.append(col_target.checkbox(labels[i], value=True, key=f"f_{i}"))
         
         st.markdown("---")
-        ver_etiquetas = st.toggle("🏷️ Mostrar Nombres fijos", value=False)
+        ver_nombres = st.toggle("🏷️ Mostrar Nombres fijos", value=False)
         archivo_excel = st.file_uploader("📂 Sube tu Excel", type=["xlsx"])
 
     # --- 4. MAPA Y PROCESAMIENTO ---
@@ -97,43 +99,43 @@ if st.session_state.get("authentication_status"):
                     color = COLORS.get(fila['RANGO_ID'], "#888")
                     folium.Circle(
                         [fila['LAT'], fila['LON']], radius=float(fila.get('RADIO', 800)),
-                        color="black", weight=1, fill=True, fill_color=color, fill_opacity=0.6,
-                        tooltip=f"Vol: {fila['VOLUMEN']}"
+                        color="black", weight=1, fill=True, fill_color=color, fill_opacity=0.7,
+                        tooltip=f"{fila.get('NOMBRE','')} | Vol: {fila['VOLUMEN']}"
                     ).add_to(m)
-                    if ver_etiquetas:
-                        folium.Marker([fila['LAT'], fila['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold;">{fila.get("NOMBRE","")}</div>')).add_to(m)
+                    if ver_nombres:
+                        folium.Marker([fila['LAT'], fila['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:black; text-shadow: 1px 1px 2px white; width:150px;">{fila.get("NOMBRE","")}</div>')).add_to(m)
 
             elif modo == "Código Postal (Polígonos)":
                 gdf_est, col_cp_json = cargar_capa_estado(archivo_sel)
                 if gdf_est is not None:
                     df_ver['CP'] = df_ver['CP'].astype(str).str.zfill(5)
                     merged = gdf_est.merge(df_ver, left_on=col_cp_json, right_on='CP')
-                    
                     if not merged.empty:
                         m.location = [merged.geometry.centroid.y.mean(), merged.geometry.centroid.x.mean()]
                         for _, fila in merged.iterrows():
                             color = COLORS.get(fila['RANGO_ID'], "#888")
                             folium.GeoJson(
                                 fila['geometry'],
-                                style_function=lambda x, c=color: {'fillColor': c, 'color': 'black', 'weight': 1, 'fillOpacity': 0.6},
+                                style_function=lambda x, c=color: {'fillColor': c, 'color': 'black', 'weight': 1, 'fillOpacity': 0.7},
                                 tooltip=f"CP: {fila['CP']} | Vol: {fila['VOLUMEN']}"
                             ).add_to(m)
-                            if ver_etiquetas:
+                            if ver_nombres:
                                 c = fila['geometry'].centroid
-                                folium.Marker([c.y, c.x], icon=folium.features.DivIcon(html=f'<div style="font-size:7pt; text-align:center;">{fila.get("NOMBRE","")}</div>')).add_to(m)
+                                folium.Marker([c.y, c.x], icon=folium.features.DivIcon(html=f'<div style="font-size:7pt; font-weight:bold; text-align:center; width:100px;">{fila.get("NOMBRE","")}</div>')).add_to(m)
 
             st_folium(m, width="100%", height=700, key="mapa_vpro")
 
-            # --- BOTÓN DE DESCARGA REPARADO ---
-            html_data = m._repr_html_()
+            # --- DESCARGA REPARADA (USANDO BYTESIO) ---
+            buffer = io.BytesIO()
+            m.save(buffer, close_file=False)
             st.download_button(
                 label="💾 Descargar Mapa HTML",
-                data=html_data,
-                file_name=f"Mapa_{archivo_sel.split('.')[0]}.html",
+                data=buffer.getvalue(),
+                file_name=f"Mapa_{archivo_sel.replace('.geojson','')}.html",
                 mime="text/html"
             )
         else:
-            st.info("👋 Sube un archivo Excel para comenzar.")
+            st.info("👋 Sube un archivo Excel para visualizar.")
 
 elif st.session_state.get("authentication_status") is False:
-    st.error('Error de acceso')
+    st.error('Acceso denegado')
