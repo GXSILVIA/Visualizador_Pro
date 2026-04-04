@@ -47,11 +47,14 @@ if st.session_state.get("authentication_status"):
         ruta = f"mapas/{nombre_archivo}"
         if os.path.exists(ruta):
             gdf = gpd.read_file(ruta)
-            posibles = ['d_cp', 'CP', 'codigopostal']
-            col_json = next((c for c in posibles if c in gdf.columns), gdf.columns)
-            col_data = gdf[col_json]
-            if isinstance(col_data, pd.DataFrame): col_data = col_data.iloc[:, 0]
-            gdf[col_json] = col_data.astype(str).str.zfill(5)
+            # Eliminar columnas duplicadas en el archivo GeoJSON para evitar el ValueError
+            gdf = gdf.loc[:, ~gdf.columns.duplicated()].copy()
+            
+            posibles = ['d_cp', 'CP', 'codigopostal', 'CODIGO_POSTAL']
+            col_json = next((c for c in posibles if c in gdf.columns), gdf.columns[0])
+            
+            # Formatear CP a 5 dígitos
+            gdf[col_json] = gdf[col_json].astype(str).str.zfill(5)
             return gdf, col_json
         return None, None
 
@@ -72,8 +75,8 @@ if st.session_state.get("authentication_status"):
         c1, c2 = st.columns(2)
         for i in range(6):
             target = c1 if i < 3 else c2
-            # El on_change=None asegura que Streamlit detecte el cambio de estado inmediatamente
-            f_checks.append(target.checkbox(labels[i], value=True, key=f"range_check_{i}"))
+            # Key única para cada checkbox
+            f_checks.append(target.checkbox(labels[i], value=True, key=f"chk_r_{i}"))
         
         st.markdown("---")
         ver_nombres = st.toggle("🏷️ Mostrar etiquetas fijas", value=False)
@@ -86,11 +89,11 @@ if st.session_state.get("authentication_status"):
             df = normalizar_columnas(df)
             df['RANGO_ID'] = df['VOLUMEN'].apply(asignar_rango)
             
-            # --- FILTRADO REAL DE DATOS ---
+            # FILTRADO DE DATOS SEGÚN CHECKBOXES
             activos = [i for i, v in enumerate(f_checks) if v]
             df_filtrado = df[df['RANGO_ID'].isin(activos)].copy()
 
-            # Mapa base limpio para que brillen los colores
+            # Mapa base claro para contraste
             m = folium.Map(location=[19.4326, -99.1332], zoom_start=6, tiles="cartodbpositron")
 
             if modo == "Coordenadas (Puntos)" and not df_filtrado.empty:
@@ -132,17 +135,14 @@ if st.session_state.get("authentication_status"):
                                     icon=folium.features.DivIcon(html=f'<div style="font-size:7pt; font-weight:bold; text-align:center; text-shadow: 1px 1px 1px white;">{fila.get("NOMBRE","")}</div>')
                                 ).add_to(m)
 
-            # USAR UNA KEY DINÁMICA BASADA EN LOS FILTROS PARA FORZAR EL REFREZCO
-            # Esto soluciona que el mapa no cambie al desmarcar rangos
-            key_mapa = f"mapa_{hash(tuple(f_checks))}_{modo}"
-            st_folium(m, width="100%", height=700, key=key_mapa)
+            # ACTUALIZACIÓN INSTANTÁNEA: Usamos hash de los checks para la key
+            st_folium(m, width="100%", height=700, key=f"map_{hash(tuple(f_checks))}")
 
-            # DESCARGA DEL MAPA ACTUAL (RESPETA FILTROS)
-            map_html = m._repr_html_()
+            # DESCARGA
             st.download_button(
                 label="💾 Descargar Mapa Actual (HTML)",
-                data=map_html,
-                file_name=f"Visualizador_{archivo_sel.replace('.geojson','')}.html",
+                data=m._repr_html_(),
+                file_name=f"Mapa_{archivo_sel.replace('.geojson','')}.html",
                 mime="text/html"
             )
         else:
