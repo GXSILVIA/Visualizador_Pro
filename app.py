@@ -8,7 +8,15 @@ from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
 from streamlit_folium import st_folium
 
-# --- 1. SEGURIDAD ---
+# --- 1. CONFIGURACIÓN Y SEGURIDAD ---
+st.set_page_config(page_title="Visualizador Pro", layout="wide")
+
+# Inicializar estados de sesión para que el mapa persista
+if "mapa_objeto" not in st.session_state:
+    st.session_state.mapa_objeto = None
+if "nombre_mapa" not in st.session_state:
+    st.session_state.nombre_mapa = ""
+
 with open('config.yaml') as file:
     config = yaml.load(file, Loader=SafeLoader)
 
@@ -20,12 +28,11 @@ authenticator = stauth.Authenticate(
 authenticator.login()
 
 if st.session_state.get("authentication_status"):
-    st.set_page_config(page_title="Visualizador Pro", layout="wide")
     st.sidebar.write(f'Bienvenido **{st.session_state["name"]}**')
     authenticator.logout('Cerrar Sesión', 'sidebar')
     st.title("📍 Visualizador Pro")
 
-    # COLORES MÁXIMO BRILLO (SÓLIDOS)
+    # COLORES MÁXIMO BRILLO
     COLORS = {
         0: "#FFFFFF", 1: "#FFFF00", 2: "#FF9900", 
         3: "#FF4444", 4: "#FF0000", 5: "#660000"
@@ -46,25 +53,19 @@ if st.session_state.get("authentication_status"):
     def cargar_capa_estado(nombre_archivo):
         ruta = f"mapas/{nombre_archivo}"
         if os.path.exists(ruta):
-            # CARGA Y LIMPIEZA INMEDIATA DE DUPLICADOS EN EL ARCHIVO DEL ESTADO
             gdf = gpd.read_file(ruta)
-            
-            # ELIMINAR COLUMNAS DUPLICADAS (Resuelve el ValueError de raíz)
+            # Limpieza de duplicados y optimización para archivos pesados
             gdf = gdf.loc[:, ~gdf.columns.duplicated()].copy()
+            # Simplificar geometría (reduce peso de 300MB para que el navegador no colapse)
+            gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.001, preserve_topology=True)
             
             posibles = ['d_cp', 'CP', 'codigopostal', 'CODIGO_POSTAL']
             col_json = next((c for c in posibles if c in gdf.columns), gdf.columns[0])
-            
-            # Asegurar que sea una serie única para evitar errores de longitud
-            col_data = gdf[col_json]
-            if isinstance(col_data, pd.DataFrame):
-                col_data = col_data.iloc[:, 0]
-            
-            gdf[col_json] = col_data.astype(str).str.zfill(5)
+            gdf[col_json] = gdf[col_json].astype(str).str.zfill(5)
             return gdf, col_json
         return None, None
 
-    # --- 2. PANEL DE CONTROL (FILTROS 3x3) ---
+    # --- 2. PANEL DE CONTROL ---
     col_mapa, col_controles = st.columns([3.5, 1])
 
     with col_controles:
@@ -81,27 +82,24 @@ if st.session_state.get("authentication_status"):
         c1, c2 = st.columns(2)
         for i in range(6):
             target = c1 if i < 3 else c2
-            f_checks.append(target.checkbox(labels[i], value=True, key=f"v_range_f4_{i}"))
+            f_checks.append(target.checkbox(labels[i], value=True, key=f"v_range_{i}"))
         
-        st.markdown("---")
-        # ETIQUETAS NEGRAS PARA MAPA BLANCO
-        ver_nombres = st.toggle("🏷️ Mostrar nombres en negro", value=False)
+        ver_nombres = st.toggle("🏷️ Mostrar nombres", value=False)
         archivo_excel = st.file_uploader("📂 Sube tu Excel", type=["xlsx"])
-        
-        # BOTÓN DE CARGA: Indispensable para archivos pesados de 300MB
         btn_procesar = st.button("🚀 Procesar Datos", use_container_width=True)
 
-    # --- 3. MAPA ---
+    # --- 3. LÓGICA DE PROCESAMIENTO Y RENDERIZADO ---
     with col_mapa:
+        # Si se pulsa el botón, generamos el mapa y lo guardamos en la sesión
         if archivo_excel and btn_procesar:
-            with st.spinner(f"Procesando polígonos de {archivo_sel}..."):
+            with st.spinner(f"Generando mapa de {archivo_sel}..."):
                 df = pd.read_excel(archivo_excel)
                 df = normalizar_columnas(df)
                 df['RANGO_ID'] = df['VOLUMEN'].apply(asignar_rango)
                 activos = [i for i, v in enumerate(f_checks) if v]
                 df_ver = df[df['RANGO_ID'].isin(activos)].copy()
 
-                # MAPA BASE BLANCO (CartoDB.Positron)
+                # Crear mapa base
                 m = folium.Map(location=[19.4326, -99.1332], zoom_start=6, tiles="CartoDB.Positron")
 
                 if modo == "Código Postal (Polígonos)":
@@ -109,36 +107,56 @@ if st.session_state.get("authentication_status"):
                     if gdf_est is not None:
                         df_ver['CP'] = df_ver['CP'].astype(str).str.zfill(5)
                         merged = gdf_est.merge(df_ver, left_on=col_cp_json, right_on='CP')
+                        
                         if not merged.empty:
+                            # Centrar mapa
                             m.location = [merged.geometry.centroid.y.mean(), merged.geometry.centroid.x.mean()]
                             for _, fila in merged.iterrows():
                                 color_poly = COLORS.get(fila['RANGO_ID'], "#888")
                                 folium.GeoJson(
                                     fila['geometry'],
                                     style_function=lambda x, c=color_poly: {
-                                        'fillColor': c, 'color': 'black', 'weight': 1, 'fillOpacity': 1.0
+                                        'fillColor': c, 'color': 'black', 'weight': 1, 'fillOpacity': 0.8
                                     },
-                                    tooltip=f"<b>CP: {fila['CP']}</b><br>Vol: {fila['VOLUMEN']}"
+                                    tooltip=f"CP: {fila['CP']} | Vol: {fila['VOLUMEN']}"
                                 ).add_to(m)
+                                
                                 if ver_nombres:
                                     centro = fila['geometry'].centroid
-                                    # ETIQUETAS NEGRAS CON FONDO BLANCO SÓLIDO Y NEGRITA 900
                                     folium.Marker([centro.y, centro.x], 
                                         icon=folium.features.DivIcon(html=f'''
-                                            <div style="font-size:7.5pt; font-weight:900; color:black; 
-                                            background-color:rgba(255,255,255,0.95); border:1px solid black; 
-                                            text-align:center; width:100px; border-radius:2px;">
+                                            <div style="font-size:7pt; font-weight:900; color:black; 
+                                            background-color:rgba(255,255,255,0.8); border:0.5px solid grey; 
+                                            text-align:center; width:80px; border-radius:2px;">
                                                 {fila.get("NOMBRE","")}
                                             </div>''')
                                     ).add_to(m)
 
-                # Renderizar con llave única para forzar limpieza de memoria
-                st_folium(m, width="100%", height=700, key=f"map_vpro_fix_v4_{hash(archivo_sel)}_{modo}")
+                # Guardar el mapa generado en el estado de sesión
+                st.session_state.mapa_objeto = m
+                st.session_state.nombre_mapa = archivo_sel
 
-                # BOTÓN DE DESCARGA
-                st.download_button(label="💾 Descargar Mapa Actual (HTML)", data=m._repr_html_(), file_name=f"Visualizador_{archivo_sel}.html", mime="text/html", use_container_width=True)
+        # MOSTRAR EL MAPA SI EXISTE EN SESIÓN (Esto evita que se borre)
+        if st.session_state.mapa_objeto is not None:
+            st_folium(
+                st.session_state.mapa_objeto, 
+                width=1100, # Ancho fijo para estabilidad
+                height=700, 
+                key=f"mapa_fijo_{st.session_state.nombre_mapa}"
+            )
+            
+            # Botón de descarga siempre disponible si hay un mapa
+            st.download_button(
+                label="💾 Descargar Mapa Actual (HTML)", 
+                data=st.session_state.mapa_objeto._repr_html_(), 
+                file_name=f"Mapa_{st.session_state.nombre_mapa}.html", 
+                mime="text/html", 
+                use_container_width=True
+            )
         else:
             st.info("👋 Sube tu Excel y presiona 'Procesar Datos' para visualizar.")
 
 elif st.session_state.get("authentication_status") is False:
-    st.error('Acceso denegado')
+    st.error('Usuario o contraseña incorrectos')
+elif st.session_state.get("authentication_status") is None:
+    st.warning('Por favor, ingresa tus credenciales')
