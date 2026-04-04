@@ -8,7 +8,7 @@ cookie:
   expiry_days: 30
   key: amzl_signature
   name: amzl_cookie
-preauthorized:
+pre-authorized:
   emails:
     - gxsilvia@outlook.com
 
