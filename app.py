@@ -3,7 +3,6 @@ import pandas as pd
 import folium
 import geopandas as gpd
 import os
-import io
 import yaml
 from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
@@ -26,8 +25,11 @@ if st.session_state.get("authentication_status"):
     authenticator.logout('Cerrar Sesión', 'sidebar')
     st.title("📍 Visualizador Pro")
 
-    # --- 2. COLORES BRILLANTES ---
-    COLORS = {0: "#FFFFFF", 1: "#FFFF00", 2: "#FFCC00", 3: "#FF6666", 4: "#FF0000", 5: "#990000"}
+    # --- 2. COLORES NEÓN (BRILLO MÁXIMO) ---
+    COLORS = {
+        0: "#FFFFFF", 1: "#FFFF00", 2: "#FFCC00", 
+        3: "#FF3333", 4: "#FF0000", 5: "#660000"
+    }
 
     def asignar_rango(v):
         try:
@@ -45,14 +47,10 @@ if st.session_state.get("authentication_status"):
         ruta = f"mapas/{nombre_archivo}"
         if os.path.exists(ruta):
             gdf = gpd.read_file(ruta)
-            posibles = ['d_cp', 'CP', 'codigopostal', 'CODIGO_POSTAL']
-            col_json = next((c for c in posibles if c in gdf.columns), gdf.columns[0])
-            
-            # CORRECCIÓN CRÍTICA: Si la columna viene duplicada, tomamos solo la primera
+            posibles = ['d_cp', 'CP', 'codigopostal']
+            col_json = next((c for c in posibles if c in gdf.columns), gdf.columns)
             col_data = gdf[col_json]
-            if isinstance(col_data, pd.DataFrame):
-                col_data = col_data.iloc[:, 0]
-            
+            if isinstance(col_data, pd.DataFrame): col_data = col_data.iloc[:, 0]
             gdf[col_json] = col_data.astype(str).str.zfill(5)
             return gdf, col_json
         return None, None
@@ -74,62 +72,77 @@ if st.session_state.get("authentication_status"):
         c1, c2 = st.columns(2)
         for i in range(6):
             target = c1 if i < 3 else c2
-            f_checks.append(target.checkbox(labels[i], value=True, key=f"f_{i}"))
+            # El on_change=None asegura que Streamlit detecte el cambio de estado inmediatamente
+            f_checks.append(target.checkbox(labels[i], value=True, key=f"range_check_{i}"))
         
         st.markdown("---")
-        ver_nombres = st.toggle("🏷️ Mostrar Nombres fijos", value=True)
+        ver_nombres = st.toggle("🏷️ Mostrar etiquetas fijas", value=False)
         archivo_excel = st.file_uploader("📂 Sube tu Excel", type=["xlsx"])
 
-    # --- 4. MAPA ---
+    # --- 4. LÓGICA DEL MAPA ---
     with col_mapa:
         if archivo_excel:
             df = pd.read_excel(archivo_excel)
             df = normalizar_columnas(df)
             df['RANGO_ID'] = df['VOLUMEN'].apply(asignar_rango)
             
+            # --- FILTRADO REAL DE DATOS ---
             activos = [i for i, v in enumerate(f_checks) if v]
-            df_ver = df[df['RANGO_ID'].isin(activos)].copy()
+            df_filtrado = df[df['RANGO_ID'].isin(activos)].copy()
 
-            m = folium.Map(location=[19.4326, -99.1332], zoom_start=6)
+            # Mapa base limpio para que brillen los colores
+            m = folium.Map(location=[19.4326, -99.1332], zoom_start=6, tiles="cartodbpositron")
 
-            if modo == "Coordenadas (Puntos)" and not df_ver.empty:
-                m.location = [df_ver['LAT'].mean(), df_ver['LON'].mean()]
-                for _, fila in df_ver.iterrows():
-                    color = COLORS.get(fila['RANGO_ID'], "#888")
+            if modo == "Coordenadas (Puntos)" and not df_filtrado.empty:
+                m.location = [df_filtrado['LAT'].mean(), df_filtrado['LON'].mean()]
+                for _, fila in df_filtrado.iterrows():
+                    color_marker = COLORS.get(fila['RANGO_ID'], "#888")
                     folium.Circle(
                         [fila['LAT'], fila['LON']], radius=float(fila.get('RADIO', 800)),
-                        color="#222", weight=1, fill=True, fill_color=color, fill_opacity=0.8,
+                        color="#444", weight=1, fill=True, fill_color=color_marker, fill_opacity=0.85,
                         tooltip=f"<b>{fila.get('NOMBRE','')}</b><br>Vol: {fila['VOLUMEN']}"
                     ).add_to(m)
+                    
                     if ver_nombres:
-                        folium.Marker([fila['LAT'], fila['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:black; background-color:white; padding:2px; border:1px solid black; border-radius:3px; width:120px;">{fila.get("NOMBRE","")}</div>')).add_to(m)
+                        folium.Marker(
+                            [fila['LAT'], fila['LON']], 
+                            icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:black; background-color:white; border:1px solid black; padding:1px; width:120px;">{fila.get("NOMBRE","")}</div>')
+                        ).add_to(m)
 
             elif modo == "Código Postal (Polígonos)":
                 gdf_est, col_cp_json = cargar_capa_estado(archivo_sel)
                 if gdf_est is not None:
-                    df_ver['CP'] = df_ver['CP'].astype(str).str.zfill(5)
-                    merged = gdf_est.merge(df_ver, left_on=col_cp_json, right_on='CP')
+                    df_filtrado['CP'] = df_filtrado['CP'].astype(str).str.zfill(5)
+                    merged = gdf_est.merge(df_filtrado, left_on=col_cp_json, right_on='CP')
+                    
                     if not merged.empty:
                         m.location = [merged.geometry.centroid.y.mean(), merged.geometry.centroid.x.mean()]
                         for _, fila in merged.iterrows():
-                            color = COLORS.get(fila['RANGO_ID'], "#888")
+                            color_poly = COLORS.get(fila['RANGO_ID'], "#888")
                             folium.GeoJson(
                                 fila['geometry'],
-                                style_function=lambda x, c=color: {'fillColor': c, 'color': 'black', 'weight': 1, 'fillOpacity': 0.8},
+                                style_function=lambda x, c=color_poly: {'fillColor': c, 'color': 'black', 'weight': 1, 'fillOpacity': 0.85},
                                 tooltip=f"<b>CP: {fila['CP']}</b><br>Vol: {fila['VOLUMEN']}"
                             ).add_to(m)
+                            
                             if ver_nombres:
-                                c = fila['geometry'].centroid
-                                folium.Marker([c.y, c.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:black; text-shadow: 1px 1px 2px white; text-align:center; width:100px;">{fila.get("NOMBRE","")}</div>')).add_to(m)
+                                centro = fila['geometry'].centroid
+                                folium.Marker(
+                                    [centro.y, centro.x], 
+                                    icon=folium.features.DivIcon(html=f'<div style="font-size:7pt; font-weight:bold; text-align:center; text-shadow: 1px 1px 1px white;">{fila.get("NOMBRE","")}</div>')
+                                ).add_to(m)
 
-            st_folium(m, width="100%", height=700, key="mapa_vpro")
+            # USAR UNA KEY DINÁMICA BASADA EN LOS FILTROS PARA FORZAR EL REFREZCO
+            # Esto soluciona que el mapa no cambie al desmarcar rangos
+            key_mapa = f"mapa_{hash(tuple(f_checks))}_{modo}"
+            st_folium(m, width="100%", height=700, key=key_mapa)
 
-            # BOTÓN DE DESCARGA
+            # DESCARGA DEL MAPA ACTUAL (RESPETA FILTROS)
             map_html = m._repr_html_()
             st.download_button(
-                label="💾 Descargar Mapa HTML",
+                label="💾 Descargar Mapa Actual (HTML)",
                 data=map_html,
-                file_name=f"Mapa_{archivo_sel.replace('.geojson','')}.html",
+                file_name=f"Visualizador_{archivo_sel.replace('.geojson','')}.html",
                 mime="text/html"
             )
         else:
