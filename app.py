@@ -13,16 +13,21 @@ from streamlit_folium import st_folium
 with open('config.yaml') as file:
     config = yaml.load(file, Loader=SafeLoader)
 
+# --- 1. CONFIGURACIÓN DE SEGURIDAD ACTUALIZADA ---
+with open('config.yaml') as file:
+    config = yaml.load(file, Loader=SafeLoader)
+
+# NUEVO FORMATO: Sin pre_authorized para evitar el DeprecationError
 authenticator = stauth.Authenticate(
     config['credentials'],
     config['cookie']['name'],
     config['cookie']['key'],
-    config['cookie']['expiry_days'],
-    config['pre_authorized']
+    config['cookie']['expiry_days']
 )
 
 # Renderizar Login
 name, authentication_status, username = authenticator.login(location='main')
+
 
 if authentication_status:
     st.set_page_config(page_title="Visualizador Pro", layout="wide")
