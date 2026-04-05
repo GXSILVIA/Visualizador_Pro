@@ -1,0 +1,17 @@
+# Configuración sensible (¡No subir!)
+config.yaml
+
+# Archivos temporales de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+venv/
+env/
+.env
+
+# Archivos de Streamlit y SO
+.streamlit/
+.DS_Store
+Thumbs.db
