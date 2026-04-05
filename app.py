@@ -79,41 +79,23 @@ if st.session_state.get("authentication_status"):
             return gdf, col_encontrada
         return None, None
 
-    # --- 3. PANEL DE CONTROL ---
-    col_mapa, col_controles = st.columns([3.5, 1])
-
-    with col_controles:
-        st.title("📍 Panel de Control")
-        authenticator.logout('Cerrar Sesión', 'sidebar')
-        
-        modo = st.radio("Modo de Visualización", ["Coordenadas (Círculos)", "Código Postal (Polígonos)"])
-        archivos = [f for f in os.listdir('mapas') if f.endswith(('.geojson', '.json'))] if os.path.exists('mapas') else []
-        archivo_sel = st.selectbox("Seleccionar Estado", sorted(archivos))
-        
-        st.markdown("---")
-        st.subheader("📊 Filtros de Rango")
-        
-        if "Código Postal" in modo:
-            labels = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"]
-        else:
-            labels = ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
-        
-        activos = []
-        c1, c2 = st.columns(2)
-        for i in range(6):
-            target = c1 if i < 3 else c2
-            if target.checkbox(labels[i], value=True, key=f"f_{i}_{modo}"): activos.append(i)
-        
-        ver_nombres = st.toggle("🏷️ Mostrar Nombres + Volumen", value=True)
-        archivo_excel = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
-        
-        btn_actualizar = st.button("🔄 Actualizar Mapa", use_container_width=True)
-
+        # --- 3. PANEL DE CONTROL ---
+        # (Este es el bloque que procesa el archivo)
         if (archivo_excel and btn_actualizar) or (archivo_excel and st.session_state.get('last_fn') != archivo_excel.name):
             progreso = st.progress(0, text="🚀 Procesando archivo...")
-            df_raw = pd.read_excel(archivo_excel)
-            df_raw.columns = df_raw.columns.str.strip().str.upper()
             
+            # 1. Lectura inicial
+            df_raw = pd.read_excel(archivo_excel)
+            
+            # 2. VALIDACIÓN DE SEGURIDAD (Límite 2000 filas)
+            if len(df_raw) > 2000:
+                st.error(f"⚠️ ARCHIVO RECHAZADO: Tiene {len(df_raw)} filas. El límite máximo permitido es de 2000 para evitar errores de memoria.")
+                st.session_state.df_datos = None
+                st.stop() # Detiene la ejecución para que no rompa el código
+            
+            # 3. Procesamiento normal si pasa la validación
+            df_raw.columns = df_raw.columns.str.strip().str.upper()
+                      
             # Mapeo de columnas (Nombre, CP, Volumen, Radio, Lat, Lon)
             renom = {'NOMBRE':'NOMBRE', 'CP':'CP', 'VOLUMEN':'VOL', 'VOL':'VOL', 'LAT':'LATITUD', 'LON':'LONGITUD', 'RADIO':'RADIO'}
             df_proc = df_raw.rename(columns=renom)
