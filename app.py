@@ -78,43 +78,35 @@ if st.session_state.get("authentication_status"):
             gdf[col_encontrada] = gdf[col_encontrada].astype(str).str.zfill(5)
             return gdf, col_encontrada
         return None, None
+            # --- 3. PANEL DE CONTROL (DEBE ESTAR AFUERA DE CUALQUIER SUB-IF) ---
+    col_mapa, col_controles = st.columns([3.5, 1])
 
-        # --- 3. PANEL DE CONTROL ---
-        # (Este es el bloque que procesa el archivo)
+    with col_controles:
+        st.title("📍 Panel de Control")
+        authenticator.logout('Cerrar Sesión', 'sidebar')
+        
+        # ... (Tu código de modo, archivos, filtros de rango, etc.)
+        
+        ver_nombres = st.toggle("🏷️ Mostrar Nombres + Volumen", value=True)
+        archivo_excel = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
+        btn_actualizar = st.button("🔄 Actualizar Mapa", use_container_width=True)
+
+        # PROCESAMIENTO DEL EXCEL
         if (archivo_excel and btn_actualizar) or (archivo_excel and st.session_state.get('last_fn') != archivo_excel.name):
             progreso = st.progress(0, text="🚀 Procesando archivo...")
-            
-            # 1. Lectura inicial
             df_raw = pd.read_excel(archivo_excel)
             
-            # 2. VALIDACIÓN DE SEGURIDAD (Límite 2000 filas)
+            # VALIDACIÓN DE 2000 FILAS
             if len(df_raw) > 2000:
-                st.error(f"⚠️ ARCHIVO RECHAZADO: Tiene {len(df_raw)} filas. El límite máximo permitido es de 2000 para evitar errores de memoria.")
+                st.error(f"⚠️ Límite excedido: {len(df_raw)} filas. Máximo 2000.")
                 st.session_state.df_datos = None
-                st.stop() # Detiene la ejecución para que no rompa el código
+                st.stop()
             
-            # 3. Procesamiento normal si pasa la validación
             df_raw.columns = df_raw.columns.str.strip().str.upper()
-                      
-            # Mapeo de columnas (Nombre, CP, Volumen, Radio, Lat, Lon)
-            renom = {'NOMBRE':'NOMBRE', 'CP':'CP', 'VOLUMEN':'VOL', 'VOL':'VOL', 'LAT':'LATITUD', 'LON':'LONGITUD', 'RADIO':'RADIO'}
-            df_proc = df_raw.rename(columns=renom)
-            
-            func_rango = rango_postal if "Código Postal" in modo else rango_coordenadas
-            df_proc['VOL'] = pd.to_numeric(df_proc['VOL'], errors='coerce').fillna(0)
-            df_proc['RANGO_ID'] = df_proc['VOL'].apply(func_rango)
-            
-            st.session_state.df_datos = df_proc
-            st.session_state.last_fn = archivo_excel.name
-            
-            if 'LATITUD' in df_proc.columns:
-                st.session_state.map_center = [df_proc['LATITUD'].dropna().mean(), df_proc['LONGITUD'].dropna().mean()]
-            
-            progreso.progress(100, text="✅ Proceso completado")
+            # ... resto del procesamiento ...
+            st.session_state.df_datos = df_proc # Asegúrate de guardar el resultado aquí
             st.rerun()
-        elif archivo_excel is None:
-            st.session_state.df_datos = None
-
+              
     # --- 4. RENDERIZADO DEL MAPA ---
     with col_mapa:
         if st.session_state.df_datos is not None:
