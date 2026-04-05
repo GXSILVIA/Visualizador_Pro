@@ -34,13 +34,13 @@ if st.session_state.get("authentication_status"):
     def rango_postal(v):
         try:
             val = float(v)
-            return 0 if val==0 else 1 if val<=15 else 2 if val<=20 else 3 if val<=30 else 4 if val<=40 else 5
+            return 0 if val==0 else 1 if val<=100 else 2 if val<=200 else 3 if val<=300 else 4 if val<=400 else 5
         except: return 0
 
     def rango_coordenadas(v):
         try:
             val = float(v)
-            return 0 if val==0 else 1 if val<=100 else 2 if val<=200 else 3 if val<=300 else 4 if val<=400 else 5
+            return 0 if val==0 else 1 if val<=15 else 2 if val<=20 else 3 if val<=30 else 4 if val<=40 else 5
         except: return 0
 
     @st.cache_data
@@ -72,9 +72,9 @@ if st.session_state.get("authentication_status"):
         
         # Etiquetas dinámicas según el modo
         if modo == "Código Postal (Polígonos)":
-            labels = ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R40+"]
-        else:
             labels = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"]
+        else:
+            labels = ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R40+"] 
         
         # Organización 3 y 3
         activos = []
