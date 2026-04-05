@@ -52,12 +52,11 @@ if st.session_state.get("authentication_status"):
             gdf = gdf.loc[:, ~gdf.columns.duplicated()].copy()
             gdf['geometry'] = gdf['geometry'].simplify(0.0008)
             
-            # BUSCADOR ROBUSTO DE COLUMNA CP EN EL MAPA
+            # Buscador de columna de CP en el GeoJSON
             posibles = ['d_cp', 'CP', 'codigopostal', 'CODIGO_POSTAL']
             col_encontrada = next((p for p in posibles if p in gdf.columns), None)
             
             if col_encontrada is None:
-                # Si no encuentra ninguna, toma la primera columna de texto
                 col_encontrada = gdf.columns[0]
             
             gdf[col_encontrada] = gdf[col_encontrada].astype(str).str.zfill(5)
@@ -81,7 +80,7 @@ if st.session_state.get("authentication_status"):
         if "Código Postal" in modo:
             labels = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"]
         else:
-            labels = ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R40+"]
+            labels = ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
         
         activos = []
         c1, c2 = st.columns(2)
@@ -99,8 +98,9 @@ if st.session_state.get("authentication_status"):
             df_raw = pd.read_excel(archivo_excel)
             df_raw.columns = df_raw.columns.str.strip().str.upper()
             
-            # MAPEAMOS COLUMNAS SEGÚN TU IMAGEN
-            df_proc = df_raw.rename(columns={'NOMBRE':'NOMBRE', 'CP':'CP', 'VOLUMEN':'VOL', 'LAT':'LATITUD', 'LON':'LONGITUD'})
+            # Mapeo de columnas (Nombre, CP, Volumen, Radio, Lat, Lon)
+            renom = {'NOMBRE':'NOMBRE', 'CP':'CP', 'VOLUMEN':'VOL', 'VOL':'VOL', 'LAT':'LATITUD', 'LON':'LONGITUD', 'RADIO':'RADIO'}
+            df_proc = df_raw.rename(columns=renom)
             
             func_rango = rango_postal if "Código Postal" in modo else rango_coordenadas
             df_proc['VOL'] = pd.to_numeric(df_proc['VOL'], errors='coerce').fillna(0)
@@ -110,10 +110,12 @@ if st.session_state.get("authentication_status"):
             st.session_state.last_fn = archivo_excel.name
             
             if 'LATITUD' in df_proc.columns:
-                st.session_state.map_center = [df_proc['LATITUD'].mean(), df_proc['LONGITUD'].mean()]
+                st.session_state.map_center = [df_proc['LATITUD'].dropna().mean(), df_proc['LONGITUD'].dropna().mean()]
             
             progreso.progress(100, text="✅ Proceso completado")
             st.rerun()
+        elif archivo_excel is None:
+            st.session_state.df_datos = None
 
     # --- 4. RENDERIZADO DEL MAPA ---
     with col_mapa:
@@ -127,7 +129,7 @@ if st.session_state.get("authentication_status"):
             if "Código Postal" in modo:
                 gdf, col_geo = cargar_capa_estado(archivo_sel)
                 if gdf is not None:
-                    # Auto-centrado en el estado
+                    # Centrar en el estado seleccionado
                     m.location = [gdf.geometry.centroid.y.mean(), gdf.geometry.centroid.x.mean()]
                     df_ver['CP'] = df_ver['CP'].astype(str).str.zfill(5)
                     merged = gdf.merge(df_ver, left_on=col_geo, right_on='CP')
@@ -145,16 +147,24 @@ if st.session_state.get("authentication_status"):
                     lat, lon = fila.get('LATITUD'), fila.get('LONGITUD')
                     if pd.notnull(lat) and pd.notnull(lon):
                         c_c = COLORS.get(fila['RANGO_ID'], "#888")
-                        folium.Circle(location=[lat, lon], radius=150, color=c_c, weight=2, fill=True, fill_color=c_c, fill_opacity=0.4).add_to(m)
+                        # TOMA EL RADIO DIRECTO DEL ARCHIVO EXCEL
+                        radio_val = float(fila.get('RADIO', 500)) 
+                        
+                        folium.Circle(
+                            location=[lat, lon], radius=radio_val, color=c_c, weight=2.5, 
+                            fill=True, fill_color=c_c, fill_opacity=0.45
+                        ).add_to(m)
+                        
                         if ver_nombres:
-                            folium.Marker([lat, lon], icon=folium.features.DivIcon(html=f'<div style="font-size: 8pt; color: black; font-weight: bold; text-shadow: 2px 2px 4px white; text-align: center; width: 100px;">{fila.get("NOMBRE","")}<br><span style="color: #d32f2f;">({int(fila["VOL"])})</span></div>')).add_to(m)
+                            folium.Marker([lat, lon], icon=folium.features.DivIcon(html=f'<div style="font-size: 8.5pt; color: black; font-weight: bold; text-shadow: 2px 2px 4px white; text-align: center; width: 120px;">{fila.get("NOMBRE","")}<br><span style="color: #d32f2f;">({int(fila["VOL"])})</span></div>')).add_to(m)
 
             st_folium(m, width=1100, height=650, key=f"vpro_{modo}_{hash(str(activos))}")
 
-            # NOMENCLATURA DINÁMICA
-            nom_est = archivo_sel.split('.')[0] if archivo_sel else "estado"
+            # NOMENCLATURA DINÁMICA CON FECHA Y HORA
+            nom_est = os.path.splitext(archivo_sel)[0] if archivo_sel else "estado"
             prefijo = "qq_" if "Código Postal" in modo else "zonas_"
-            fn_final = f"{prefijo}{nom_est}_{datetime.now().strftime('%Y%m%d_%H%M')}.html"
+            fecha_str = datetime.now().strftime("%Y%m%d_%H%M")
+            fn_final = f"{prefijo}{nom_est}_{fecha_str}.html"
 
             b64 = base64.b64encode(m._repr_html_().encode()).decode()
             st.markdown(f'<a href="data:text/html;base64,{b64}" download="{fn_final}" style="text-decoration:none;"><button style="width:100%; cursor:pointer; background-color:#FF4B4B; color:white; border:none; padding:12px; border-radius:5px; font-weight:bold; margin-top:10px;">💾 DESCARGAR: {fn_final.upper()}</button></a>', unsafe_allow_html=True)
