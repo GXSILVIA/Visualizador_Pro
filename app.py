@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+#-*- coding: utf-8 -*-
 #
 # Copyright 2026 Silvia Guadalupe Garcia Espinosa
 #
@@ -64,14 +64,12 @@ if st.session_state.get("authentication_status"):
     def cargar_capa_estado(archivo):
         ruta = f"mapas/{archivo}"
         if os.path.exists(ruta):
-            gdf = gpd.read_file(ruta)
+            gdf = gpd.read_file(ruta).to_crs("EPSG:4326")  # fuerza CRS
             gdf = gdf.loc[:, ~gdf.columns.duplicated()].copy()
             gdf['geometry'] = gdf['geometry'].simplify(0.0008)
             
-            # Buscador de columna de CP en el GeoJSON
-            posibles = ['d_cp', 'CP', 'codigopostal', 'CODIGO_POSTAL']
+            posibles = ['d_cp', 'CP', 'CODIGOPOSTAL', 'CODIGO_POSTAL']
             col_encontrada = next((p for p in posibles if p in gdf.columns), None)
-            
             if col_encontrada is None:
                 col_encontrada = gdf.columns[0]
             
@@ -79,7 +77,7 @@ if st.session_state.get("authentication_status"):
             return gdf, col_encontrada
         return None, None
         
-           # --- 3. PANEL DE CONTROL ---
+    # --- 3. PANEL DE CONTROL ---
     col_mapa, col_controles = st.columns([3.5, 1])
 
     with col_controles:
@@ -118,11 +116,20 @@ if st.session_state.get("authentication_status"):
             if len(df_raw) > 2000:
                 st.error(f"❌ ARCHIVO MUY GRANDE: Tiene {len(df_raw)} filas. El límite son 2000.")
                 st.session_state.df_datos = None
-                st.stop() # Esto evita que el código siga y se trabe
+                st.stop()
             
             # --- PROCESAMIENTO ---
             df_raw.columns = df_raw.columns.str.strip().str.upper()
-            renom = {'NOMBRE':'NOMBRE', 'CP':'CP', 'VOLUMEN':'VOL', 'VOL':'VOL', 'LAT':'LATITUD', 'LON':'LONGITUD', 'RADIO':'RADIO'}
+            st.write("Columnas detectadas:", df_raw.columns.tolist())
+            
+            renom = {
+                'NOMBRE':'NOMBRE',
+                'LATITUD':'LATITUD',
+                'LONGITUD':'LONGITUD',
+                'RADIO':'RADIO',
+                'VOLUMEN':'VOL',
+                'VOL':'VOL'
+            }
             df_proc = df_raw.rename(columns=renom)
             
             func_rango = rango_postal if "Código Postal" in modo else rango_coordenadas
@@ -132,8 +139,11 @@ if st.session_state.get("authentication_status"):
             st.session_state.df_datos = df_proc
             st.session_state.last_fn = archivo_excel.name
             
-            if 'LATITUD' in df_proc.columns:
-                st.session_state.map_center = [df_proc['LATITUD'].dropna().mean(), df_proc['LONGITUD'].dropna().mean()]
+            if 'LATITUD' in df_proc.columns and 'LONGITUD' in df_proc.columns:
+                st.session_state.map_center = [
+                    df_proc['LATITUD'].dropna().mean(),
+                    df_proc['LONGITUD'].dropna().mean()
+                ]
             
             progreso.progress(100, text="✅ Proceso completado")
             st.rerun()
@@ -153,7 +163,6 @@ if st.session_state.get("authentication_status"):
             if "Código Postal" in modo:
                 gdf, col_geo = cargar_capa_estado(archivo_sel)
                 if gdf is not None:
-                    # Centrar en el estado seleccionado
                     m.location = [gdf.geometry.centroid.y.mean(), gdf.geometry.centroid.x.mean()]
                     df_ver['CP'] = df_ver['CP'].astype(str).str.zfill(5)
                     merged = gdf.merge(df_ver, left_on=col_geo, right_on='CP')
@@ -165,35 +174,4 @@ if st.session_state.get("authentication_status"):
                         }).add_to(m)
                         if ver_nombres:
                             cen = fila['geometry'].centroid
-                            folium.Marker([cen.y, cen.x], icon=folium.features.DivIcon(html=f'<div style="font-size: 8pt; color: #333; font-weight: bold; text-shadow: 1px 1px 2px white; text-align: center; width: 120px;">{fila.get("NOMBRE","")}<br><span style="color: #d32f2f; font-size: 7pt;">({int(fila["VOL"])})</span></div>')).add_to(m)        
-            else:
-                for _, fila in df_ver.iterrows():
-                    lat, lon = fila.get('LATITUD'), fila.get('LONGITUD')
-                    if pd.notnull(lat) and pd.notnull(lon):
-                        c_c = COLORS.get(fila['RANGO_ID'], "#888")
-                        # TOMA EL RADIO DIRECTO DEL ARCHIVO EXCEL
-                        radio_val = float(fila.get('RADIO', 500)) 
-                        
-                        folium.Circle(
-                            location=[lat, lon], radius=radio_val, color=c_c, weight=2.5, 
-                            fill=True, fill_color=c_c, fill_opacity=0.45
-                        ).add_to(m)
-                        
-                        if ver_nombres:
-                            folium.Marker([lat, lon], icon=folium.features.DivIcon(html=f'<div style="font-size: 8.5pt; color: black; font-weight: bold; text-shadow: 2px 2px 4px white; text-align: center; width: 120px;">{fila.get("NOMBRE","")}<br><span style="color: #d32f2f;">({int(fila["VOL"])})</span></div>')).add_to(m)
-
-            st_folium(m, width=1100, height=650, key=f"vpro_{modo}_{hash(str(activos))}")
-
-            # NOMENCLATURA DINÁMICA CON FECHA Y HORA
-            nom_est = os.path.splitext(archivo_sel)[0] if archivo_sel else "estado"
-            prefijo = "qq_" if "Código Postal" in modo else "zonas_"
-            fecha_str = datetime.now().strftime("%Y%m%d_%H%M")
-            fn_final = f"{prefijo}{nom_est}_{fecha_str}.html"
-
-            b64 = base64.b64encode(m._repr_html_().encode()).decode()
-            st.markdown(f'<a href="data:text/html;base64,{b64}" download="{fn_final}" style="text-decoration:none;"><button style="width:100%; cursor:pointer; background-color:#FF4B4B; color:white; border:none; padding:12px; border-radius:5px; font-weight:bold; margin-top:10px;">💾 DESCARGAR: {fn_final.upper()}</button></a>', unsafe_allow_html=True)
-        else:
-            st.info("👋 Por favor, carga un archivo Excel para visualizar los datos.")
-
-elif st.session_state.get("authentication_status") is False:
-    st.error('Usuario/Contraseña incorrectos')
+                            folium.Marker([cen.y, cen.x], icon=folium.features.DivIcon(html=f'<div style="font-size: 8pt; color: #333; font-weight: bold; text-shadow: 1px 1px 2px white; text-align: center; width: 120px;">{fila.get("NOMBRE","")}<br><span style="color: #d32f2f; font-size: 7pt;">({int(fila["VOL"])})</span 
