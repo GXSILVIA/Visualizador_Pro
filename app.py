@@ -4,6 +4,7 @@
 import streamlit as st
 import pandas as pd
 import folium
+from folium.plugins import HeatMap
 import geopandas as gpd
 import os
 import yaml
@@ -32,7 +33,7 @@ except Exception as e:
     st.error(f"Error en configuración: {e}"); st.stop()
 
 if authentication_status:
-    # --- 2. LÓGICA DE RANGOS DIFERENCIADA ---
+    # --- 2. LÓGICA DE RANGOS ORIGINAL ---
     def obtener_rango_id(vol, modo):
         v = float(vol)
         if "Código Postal" in modo:
@@ -57,31 +58,25 @@ if authentication_status:
             gdf = gpd.read_file(ruta).to_crs("EPSG:4326")
             gdf['geometry'] = gdf['geometry'].simplify(0.002)
             posibles = ['d_cp', 'CP', 'CODIGOPOSTAL']
-            col_encontrada = next((p for p in posibles if p in gdf.columns), gdf.columns[0])
+            col_encontrada = next((p for p in posibles if p in gdf.columns), gdf.columns)
             gdf[col_encontrada] = gdf[col_encontrada].astype(str).str.zfill(5)
             return gdf, col_encontrada
         return None, None
 
     # --- 3. PANEL DE CONTROL ---
-    col_mapa, col_controles = st.columns([3.5, 1])
+    col_mapa, col_controles = st.columns([3, 1.2])
 
     with col_controles:
-        st.title("📍 Panel de Control")
+        st.title("📍 Control y Análisis")
         authenticator.logout('Cerrar Sesión', 'sidebar')
         
-        modo = st.radio("Modo de Visualización", ["Coordenadas (Círculos)", "Código Postal (Polígonos)"])
-        archivos = [f for f in os.listdir('mapas') if f.endswith(('.geojson', '.json'))] if os.path.exists('mapas') else []
-        archivo_sel = st.selectbox("Seleccionar Mapa Base", sorted(archivos))
+        modo = st.radio("Visualización", ["Coordenadas (Círculos)", "Código Postal (Polígonos)", "Mapa de Calor (Densidad)"])
+        archivo_sel = st.selectbox("Mapa Base", sorted([f for f in os.listdir('mapas') if f.endswith(('.json', '.geojson'))])) if "Código Postal" in modo else None
         
         st.markdown("---")
         st.subheader("📊 Filtros de Rango")
+        labels = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Código Postal" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
         
-        if "Código Postal" in modo:
-            labels = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"]
-        else:
-            labels = ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
-        
-        # Filtros ordenados 3 y 3
         activos = []
         f1 = st.columns(3); f2 = st.columns(3)
         for i in range(6):
@@ -91,14 +86,25 @@ if authentication_status:
         st.markdown("---")
         ver_nombres = st.toggle("🏷️ Mostrar Nombres Fijos", value=True)
         archivo_excel = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
-        btn_actualizar = st.button("🔄 Actualizar Mapa", use_container_width=True)
+        btn_actualizar = st.button("🔄 Procesar y Analizar", use_container_width=True)
 
         if (archivo_excel and btn_actualizar) or (archivo_excel and st.session_state.get('last_fn') != archivo_excel.name):
             df_raw = pd.read_excel(archivo_excel)
             df_raw.columns = df_raw.columns.str.strip().str.upper()
-            df_proc = df_raw.rename(columns={'VOLUMEN':'VOL', 'C.P.':'CP', 'CODIGO_POSTAL':'CP'})
+            df_proc = df_raw.rename(columns={'VOLUMEN':'VOL', 'C.P.':'CP', 'CODIGO_POSTAL':'CP', 'NOMBRE':'ZONA', 'PERSONA':'PERSONA'})
+            
+            # Si no existen columnas de análisis, las creamos vacías para evitar errores
+            if 'ZONA' not in df_proc.columns: df_proc['ZONA'] = "General"
+            if 'PERSONA' not in df_proc.columns: df_proc['PERSONA'] = "N/A"
+            
             df_proc['VOL'] = pd.to_numeric(df_proc.get('VOL', 0), errors='coerce').fillna(0)
             df_proc['RANGO_ID'] = df_proc['VOL'].apply(lambda x: obtener_rango_id(x, modo))
+            
+            # --- CÁLCULO DE PORCENTAJES POR ÁREA ---
+            # Sumamos el volumen total de cada Zona/Área encimada
+            total_por_zona = df_proc.groupby('ZONA')['VOL'].transform('sum')
+            # Sacamos qué % del total de esa zona le toca a cada persona
+            df_proc['PORC_ZONA'] = (df_proc['VOL'] / total_por_zona * 100).round(1).fillna(0)
             
             st.session_state.df_datos = df_proc
             st.session_state.last_fn = archivo_excel.name
@@ -106,58 +112,48 @@ if authentication_status:
                 st.session_state.map_center = [df_proc['LATITUD'].dropna().mean(), df_proc['LONGITUD'].dropna().mean()]
             st.rerun()
 
+        # --- MOSTRAR TABLA DE ANÁLISIS DE REPARTO ---
+        if st.session_state.df_datos is not None:
+            st.markdown("### 📊 Reparto por Persona")
+            df_ana = st.session_state.df_datos[['ZONA', 'PERSONA', 'VOL', 'PORC_ZONA']].sort_values(by=['ZONA', 'VOL'], ascending=[True, False])
+            st.dataframe(df_ana.style.format({'PORC_ZONA': '{:.1f}%'}), height=250)
+
     # --- 4. RENDERIZADO DEL MAPA ---
     with col_mapa:
         if st.session_state.df_datos is not None:
             df_ver = st.session_state.df_datos[st.session_state.df_datos['RANGO_ID'].isin(activos)].copy()
             m = folium.Map(location=st.session_state.map_center, zoom_start=12, tiles="CartoDB Voyager")
             COLORS = {0:"#FFFFFF", 1:"#FFFF00", 2:"#FF9900", 3:"#FF4444", 4:"#FF0000", 5:"#660000"}
-
-            # Estilo de etiqueta limpia
             estilo_txt = 'font-size: 7pt; color: #222; text-align: center; width: 100px; line-height: 1; pointer-events: none;'
 
-            if "Código Postal" in modo:
+            if "Calor" in modo:
+                df_heat = df_ver.dropna(subset=['LATITUD', 'LONGITUD'])
+                HeatMap([[f['LATITUD'], f['LONGITUD'], f['VOL']] for _, f in df_heat.iterrows()], radius=20).add_to(m)
+            
+            elif "Código Postal" in modo:
                 gdf, col_geo = cargar_capa_estado(archivo_sel)
                 if gdf is not None:
-                    df_ver['CP'] = df_ver['CP'].astype(str).str.zfill(5)
+                    df_ver['CP'] = df_ver.get('CP', 0).astype(str).str.zfill(5)
                     merged = gdf.merge(df_ver, left_on=col_geo, right_on='CP')
                     for _, fila in merged.iterrows():
                         c = COLORS.get(fila['RANGO_ID'], "#888")
-                        tooltip = f"{fila.get('NOMBRE','')} - Vol: {int(fila['VOL'])}"
-                        
-                        folium.GeoJson(fila['geometry'], tooltip=tooltip, style_function=lambda x, col=c: {
-                            'fillColor': col, 'color': col, 'weight': 1.5, 'fillOpacity': 0.4
-                        }).add_to(m)
-                        
+                        tooltip = f"Zona: {fila['ZONA']} | Persona: {fila['PERSONA']} | Reparto: {fila['PORC_ZONA']}%"
+                        folium.GeoJson(fila['geometry'], tooltip=tooltip, style_function=lambda x, col=c: {'fillColor': col, 'color': col, 'weight': 1.5, 'fillOpacity': 0.4}).add_to(m)
                         if ver_nombres and fila["VOL"] > 0:
                             cen = fila['geometry'].centroid
-                            html = f'<div style="{estilo_txt}">{fila.get("NOMBRE","")}<br><b style="color: #d32f2f;">{int(fila["VOL"])}</b></div>'
+                            html = f'<div style="{estilo_txt}">{fila["PERSONA"]}<br><b style="color:#d32f2f;">{fila["PORC_ZONA"]}%</b></div>'
                             folium.Marker([cen.y, cen.x], icon=folium.features.DivIcon(html=html)).add_to(m)
             else:
                 df_gps = df_ver.dropna(subset=['LATITUD', 'LONGITUD'])
                 for _, fila in df_gps.iterrows():
                     c = COLORS.get(fila['RANGO_ID'], "#888")
-                    tooltip = f"{fila.get('NOMBRE', '')} - Vol: {int(fila['VOL'])}"
-                    
-                    folium.CircleMarker(
-                        location=[fila['LATITUD'], fila['LONGITUD']], 
-                        radius=7, color=c, fill=True, fill_color=c, fill_opacity=0.8,
-                        tooltip=tooltip
-                    ).add_to(m)
-                    
+                    tooltip = f"{fila['PERSONA']} - Vol: {int(fila['VOL'])} ({fila['PORC_ZONA']}% de la zona)"
+                    folium.CircleMarker([fila['LATITUD'], fila['LONGITUD']], radius=7, color=c, fill=True, fill_color=c, fill_opacity=0.8, tooltip=tooltip).add_to(m)
                     if ver_nombres:
-                        html = f'<div style="{estilo_txt}">{fila.get("NOMBRE","")}<br><b style="color: #d32f2f;">{int(fila["VOL"])}</b></div>'
+                        html = f'<div style="{estilo_txt}">{fila["PERSONA"]}<br><b style="color:#d32f2f;">{fila["PORC_ZONA"]}%</b></div>'
                         folium.Marker([fila['LATITUD'], fila['LONGITUD']], icon=folium.features.DivIcon(html=html, icon_anchor=(50, 15))).add_to(m)
 
-            st_folium(m, width="100%", height=700, returned_objects=[])
-            
-            # Botón de Descarga
-            st.markdown("---")
-            mapa_datos = m._repr_html_().encode('utf-8')
-            st.download_button(label="💾 Descargar Mapa Actual (HTML)", data=mapa_datos, 
-                               file_name=f"mapa_amzl_{datetime.now().strftime('%H%M%S')}.html", mime="text/html", use_container_width=True)
+            st_folium(m, width="100%", height=700)
+            st.download_button("💾 Descargar Mapa HTML", data=m._repr_html_().encode('utf-8'), file_name=f"analisis_{datetime.now().strftime('%H%M')}.html", mime="text/html", use_container_width=True)
 
-elif authentication_status is False:
-    st.error('Usuario/Contraseña incorrectos')
-elif authentication_status is None:
-    st.warning('Por favor, ingrese sus credenciales')
+elif authentication_status is False: st.error('Credenciales incorrectas')
