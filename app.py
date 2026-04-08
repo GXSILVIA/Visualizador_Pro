@@ -4,8 +4,7 @@
 import streamlit as st
 import pandas as pd
 import folium
-from folium.plugins import HeatMap, Geocoder
-import geopandas as gpd
+from folium.plugins import HeatMap
 import os
 import yaml
 from yaml.loader import SafeLoader
@@ -19,7 +18,6 @@ st.set_page_config(page_title="Sistema Pro AMZL", layout="wide")
 if 'dict_datos' not in st.session_state: st.session_state.dict_datos = {}
 if 'map_center' not in st.session_state: st.session_state.map_center = [19.4326, -99.1332]
 
-# Autenticación
 try:
     with open('config.yaml') as file:
         config = yaml.load(file, Loader=SafeLoader)
@@ -28,7 +26,7 @@ try:
 except: st.error("Error de configuración de seguridad."); st.stop()
 
 if auth_status:
-    # --- 2. LÓGICA DE PROCESAMIENTO Y RANGOS COMPLETOS ---
+    # --- 2. LÓGICA DE PROCESAMIENTO ---
     def normalizar_df(df, modo_ref):
         df.columns = df.columns.str.strip().str.upper()
         cols = df.columns
@@ -49,23 +47,16 @@ if auth_status:
         if 'NOM' not in df.columns: df['NOM'] = df.get('CP', 'Zona')
         if 'PER' not in df.columns: df['PER'] = "N/A"
         
-        # --- DEFINICIÓN DE RANGOS COMPLETOS (R0-R5) ---
+        # --- DEFINICIÓN DE LÍMITES ---
         def asignar_rango(v):
             if v <= 0: return 0
             if "Polígonos" in modo_ref:
-                # Escala Polígonos
-                if v <= 100: return 1
-                if v <= 200: return 2
-                if v <= 300: return 3
-                if v <= 400: return 4
-                return 5
+                lims = [100, 200, 300, 400]
             else:
-                # Escala Coordenadas
-                if v <= 15: return 1
-                if v <= 20: return 2
-                if v <= 30: return 3
-                if v <= 40: return 4
-                return 5
+                lims = [15, 20, 30, 40]
+            for i, l in enumerate(lims, 1):
+                if v <= l: return i
+            return 5
 
         df['RANGO_ID'] = df['VOL'].apply(asignar_rango)
         total_z = df.groupby('NOM')['VOL'].transform('sum')
@@ -76,28 +67,24 @@ if auth_status:
     def cargar_capa_estado(archivo):
         ruta = f"mapas/{archivo}"
         if os.path.exists(ruta):
+            import geopandas as gpd
             gdf = gpd.read_file(ruta).to_crs("EPSG:4326")
             gdf['geometry'] = gdf['geometry'].simplify(0.002)
-            col_geo = next((p for p in ['d_cp', 'CP', 'CODIGOPOSTAL'] if p in gdf.columns), gdf.columns)
+            col_geo = next((p for p in ['d_cp', 'CP', 'CODIGOPOSTAL'] if p in gdf.columns), gdf.columns[0])
             return gdf, col_geo
         return None, None
 
     # --- 3. PANEL DE CONTROL ---
     col_mapa, col_controles = st.columns([3, 1.3])
-
     with col_controles:
-        st.title("🛡️ Panel Pro AMZL")
+        st.title("🛡️ Panel AMZL")
         authenticator.logout('Cerrar Sesión', 'sidebar')
         modo = st.radio("Capa Principal", ["Coordenadas", "Polígonos CP", "Mapa de Calor (Análisis)"])
         
         archivo_excel = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
         if archivo_excel and st.button("🔄 Procesar Datos"):
             xl = pd.ExcelFile(archivo_excel)
-            if "Análisis" in modo:
-                st.session_state.dict_datos = {p: normalizar_df(xl.parse(p), modo) for p in xl.sheet_names}
-            else:
-                p1 = xl.sheet_names[0]
-                st.session_state.dict_datos = {p1: normalizar_df(xl.parse(p1), modo)}
+            st.session_state.dict_datos = {p: normalizar_df(xl.parse(p), modo) for p in xl.sheet_names}
             st.rerun()
 
         if st.session_state.dict_datos:
@@ -107,58 +94,55 @@ if auth_status:
             
             st.markdown("---")
             st.subheader("📊 Filtros de Rango")
-            stats = df_act.groupby('RANGO_ID')['VOL'].agg(['count', 'sum'])
             
-            # Etiquetas con límites visibles
+            # --- DEFINICIÓN DE ETIQUETAS CON CANTIDADES QUE ABARCAN ---
             if "Polígonos" in modo:
-                lbls = ["⚪ R0 (0)", "🟡 R1 (1-100)", "🟠 R2 (101-200)", "🔴 R3 (201-300)", "🏮 R4 (301-400)", "🍷 R5 (401+)"]
+                rangos_txt = ["0", "1-100", "101-200", "201-300", "301-400", "401+"]
             else:
-                lbls = ["⚪ R0 (0)", "🟡 R1 (1-15)", "🟠 R2 (16-20)", "🔴 R3 (21-30)", "🏮 R4 (31-40)", "🍷 R5 (41+)"]
+                rangos_txt = ["0", "1-15", "16-20", "21-30", "31-40", "41+"]
+            
+            stats = df_act.groupby('RANGO_ID')['VOL'].agg(['count', 'sum'])
+            iconos = ["⚪", "🟡", "🟠", "🔴", "🏮", "🍷"]
+            nombres = ["R0", "R1", "R2", "R3", "R4", "R5"]
             
             activos = []
             f1, f2 = st.columns(2)
             for i in range(6):
-                c = f1 if i < 3 else f2
+                col_ui = f1 if i < 3 else f2
                 n = int(stats.loc[i, 'count']) if i in stats.index else 0
                 v = int(stats.loc[i, 'sum']) if i in stats.index else 0
-                if c.checkbox(f"{lbls[i]} \n[{n} pts | Vol: {v}]", value=True, key=f"r_{i}"): activos.append(i)
+                # Etiqueta Final: Icono + Nombre + Rango Numérico + Estadísticas
+                label = f"{iconos[i]} {nombres[i]} ({rangos_txt[i]}) \n [{n} pts | Vol: {v}]"
+                if col_ui.checkbox(label, value=True, key=f"r_{i}_{modo}"):
+                    activos.append(i)
             
             ver_nombres = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             if "Polígonos" in modo:
-                archivo_sel = st.selectbox("Mapa Base", sorted([f for f in os.listdir('mapas') if f.endswith(('.json', '.geojson'))]))
+                archivos = sorted([f for f in os.listdir('mapas') if f.endswith(('.json', '.geojson'))])
+                archivo_sel = st.selectbox("Mapa Base", archivos)
 
-    # --- 4. RENDERIZADO DEL MAPA ---
+    # --- 4. RENDERIZADO ---
     with col_mapa:
         if st.session_state.dict_datos:
             df_m = df_act[df_act['RANGO_ID'].isin(activos)].copy()
             m = folium.Map(location=st.session_state.map_center, zoom_start=12, tiles="CartoDB Voyager")
             COLORS = {0:"#FFFFFF", 1:"#FFFF00", 2:"#FF9900", 3:"#FF4444", 4:"#FF0000", 5:"#660000"}
 
-            if "Análisis" in modo:
-                HeatMap([[f['LAT'], f['LON'], f['VOL']] for _, f in df_m.dropna(subset=['LAT', 'LON']).iterrows()], radius=20, blur=15).add_to(m)
-                for _, f in df_m.dropna(subset=['LAT', 'LON']).iterrows():
-                    info = f"<b>{f['PER']}</b><br>Zona: {f['NOM']}<br>Vol: {int(f['VOL'])}<br>Reparto: {f['PORC_ZONA']}%"
-                    folium.CircleMarker([f['LAT'], f['LON']], radius=8, color='transparent', fill=False, tooltip=folium.Tooltip(info)).add_to(m)
-            
-            elif "Polígonos" in modo:
-                gdf, col_geo = cargar_capa_estado(archivo_sel)
-                if gdf is not None:
-                    merged = gdf.merge(df_m, left_on=col_geo, right_on='CP')
-                    for _, f in merged.iterrows():
-                        c = COLORS.get(f['RANGO_ID'], "#888")
-                        info = f"<b>{f['PER']}</b><br>CP: {f['CP']}<br>Vol: {int(f['VOL'])}<br>Reparto: {f['PORC_ZONA']}%"
-                        folium.GeoJson(f['geometry'], tooltip=folium.Tooltip(info),
-                                       style_function=lambda x, col=c: {'fillColor':col, 'color':col, 'fillOpacity':0.4, 'weight':1.5}).add_to(m)
-                        if ver_nombres:
-                            folium.Marker([f['geometry'].centroid.y, f['geometry'].centroid.x], 
-                                          icon=folium.features.DivIcon(html=f'<div style="font-size:7pt;text-align:center;width:80px;font-weight:bold;text-shadow:1px 1px 2px white;">{f["PER"]}</div>')).add_to(m)
+            if "Calor" in modo:
+                df_h = df_m.dropna(subset=['LAT', 'LON'])
+                # Mapa de calor como CONJUNTO (Radio y Blur altos)
+                HeatMap([[f['LAT'], f['LON'], f['VOL']] for _, f in df_h.iterrows()], 
+                        radius=50, blur=30, min_opacity=0.4).add_to(m)
             else:
                 for _, f in df_m.dropna(subset=['LAT', 'LON']).iterrows():
                     c = COLORS.get(f['RANGO_ID'], "#888")
-                    info = f"<b>{f['PER']}</b><br>Vol: {int(f['VOL'])}<br>Radio: {int(f['RAD'])}m<br>Reparto: {f['PORC_ZONA']}%"
-                    folium.Circle(location=[f['LAT'], f['LON']], radius=f['RAD'], color=c, fill=True, fill_color=c, fill_opacity=0.3, weight=1.5, tooltip=folium.Tooltip(info)).add_to(m)
+                    folium.Circle(location=[f['LAT'], f['LON']], radius=f['RAD'], color=c, fill=True, fill_color=c, fill_opacity=0.3, weight=1.5,
+                                  tooltip=f"<b>{f['PER']}</b><br>Vol: {int(f['VOL'])}<br>Reparto: {f['PORC_ZONA']}%").add_to(m)
                     if ver_nombres:
-                        folium.Marker([f['LAT'], f['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:7pt;text-align:center;width:120px;font-weight:bold;text-shadow:1px 1px 2px white;">{f["PER"]}</div>', icon_anchor=(60,0))).add_to(m)
+                        # NOMBRES EN NEGRO con sombra blanca para legibilidad total
+                        style = f'''<div style="font-size:8pt; color:#000; font-weight:bold; text-align:center; 
+                                   width:100px; text-shadow: 2px 2px 3px #FFF, -2px -2px 3px #FFF;">{f["PER"]}</div>'''
+                        folium.Marker([f['LAT'], f['LON']], icon=folium.features.DivIcon(html=style, icon_anchor=(50, 0))).add_to(m)
 
             if not df_m.empty: m.fit_bounds([[df_m['LAT'].min(), df_m['LON'].min()], [df_m['LAT'].max(), df_m['LON'].max()]])
             st_folium(m, width="100%", height=550)
@@ -169,17 +153,15 @@ if auth_status:
             c1, c2, c3 = st.columns([1, 1.5, 1.5])
             u_total = df_m['VOL'].sum()
             c1.metric("Universo Total", f"{int(u_total):,}")
-            
             top_p = df_m.groupby('PER')['VOL'].sum().sort_values(ascending=False).head(5)
-            c2.write("**🔥 Top Impacto por Responsable:**")
-            for p, v in top_p.items(): c2.caption(f"{p}: {int(v):,} units ({(v/u_total*100):.1f}%)")
-            
+            c2.write("**🔥 Impacto por Responsable:**")
+            for p, v in top_p.items():
+                c2.caption(f"{p}: {int(v):,} ({(v/u_total*100 if u_total>0 else 0):.1f}%)")
             enc = df_m[df_m.duplicated('NOM', keep=False)]
-            c3.write(f"**🤝 Saturación:** {enc['NOM'].nunique()} zonas encimadas")
-            z_sel = c3.selectbox("Analizar Reparto por Zona:", ["-"] + sorted(enc['NOM'].unique().tolist()))
-            if z_sel != "-":
-                st.table(enc[enc['NOM'] == z_sel][['PER', 'VOL', 'PORC_ZONA']].sort_values('VOL', ascending=False))
+            c3.write(f"**🤝 Saturación:** {enc['NOM'].nunique()} zonas")
+            z_sel = c3.selectbox("Analizar Reparto:", ["-"] + sorted(enc['NOM'].unique().tolist()))
+            if z_sel != "-": st.table(enc[enc['NOM'] == z_sel][['PER', 'VOL', 'PORC_ZONA']])
 
-            st.download_button("💾 Descargar Mapa HTML", data=m._repr_html_().encode('utf-8'), file_name=f"amzl_{fecha_sel}.html", mime="text/html")
+            st.download_button("💾 Descargar Mapa", data=m._repr_html_().encode('utf-8'), file_name=f"reporte_{fecha_sel}.html", mime="text/html")
 
 elif auth_status is False: st.error('Credenciales incorrectas')
