@@ -151,27 +151,52 @@ if st.session_state.get("authentication_status"):
         elif archivo_excel is None:
             st.session_state.df_datos = None
 
-    # --- 4. RENDERIZADO DEL MAPA ---
-    with col_mapa:
-        if st.session_state.df_datos is not None:
-            df_ver = st.session_state.df_datos.copy()
-            df_ver = df_ver[df_ver['RANGO_ID'].isin(activos)]
-            
-            m = folium.Map(location=st.session_state.map_center, zoom_start=12, tiles="CartoDB Voyager")
-            COLORS = {0:"#FFFFFF", 1:"#FFFF00", 2:"#FF9900", 3:"#FF4444", 4:"#FF0000", 5:"#660000"}
+   # --- 4. RENDERIZADO DEL MAPA ---
+with col_mapa:
+    if st.session_state.df_datos is not None:
+        df_ver = st.session_state.df_datos.copy()
+        df_ver = df_ver[df_ver['RANGO_ID'].isin(activos)]
+        
+        # Mapa base
+        m = folium.Map(location=st.session_state.map_center, zoom_start=12, tiles="CartoDB Voyager")
+        COLORS = {0:"#FFFFFF", 1:"#FFFF00", 2:"#FF9900", 3:"#FF4444", 4:"#FF0000", 5:"#660000"}
 
-            if "Código Postal" in modo:
-                gdf, col_geo = cargar_capa_estado(archivo_sel)
-                if gdf is not None:
-                    m.location = [gdf.geometry.centroid.y.mean(), gdf.geometry.centroid.x.mean()]
-                    df_ver['CP'] = df_ver['CP'].astype(str).str.zfill(5)
-                    merged = gdf.merge(df_ver, left_on=col_geo, right_on='CP')
+        if "Código Postal" in modo:
+            gdf, col_geo = cargar_capa_estado(archivo_sel)
+            if gdf is not None:
+                # Ajustar centro del mapa al promedio de los centroides
+                m.location = [gdf.geometry.centroid.y.mean(), gdf.geometry.centroid.x.mean()]
+                
+                # Normalizar CP y unir datos
+                df_ver['CP'] = df_ver['CP'].astype(str).str.zfill(5)
+                merged = gdf.merge(df_ver, left_on=col_geo, right_on='CP')
+                
+                for _, fila in merged.iterrows():
+                    c_p = COLORS.get(fila['RANGO_ID'], "#888")
                     
-                    for _, fila in merged.iterrows():
-                        c_p = COLORS.get(fila['RANGO_ID'], "#888")
-                        folium.GeoJson(fila['geometry'], style_function=lambda x, c=c_p: {
-                            'fillColor': c, 'color': '#444444', 'weight': 1.5, 'fillOpacity': 0.25, 'opacity': 0.7
-                        }).add_to(m)
-                        if ver_nombres:
-                            cen = fila['geometry'].centroid
-                            folium.Marker([cen.y, cen.x], icon=folium.features.DivIcon(html=f'<div style="font-size: 8pt; color: #333; font-weight: bold; text-shadow: 1px 1px 2px white; text-align: center; width: 120px;">{fila.get("NOMBRE","")}<br><span style="color: #d32f2f; font-size: 7pt;">({int(fila["VOL"])})</span 
+                    # Dibujar Polígono
+                    folium.GeoJson(
+                        fila['geometry'],
+                        style_function=lambda x, c=c_p: {
+                            'fillColor': c, 
+                            'color': '#444444', 
+                            'weight': 1.5, 
+                            'fillOpacity': 0.25, 
+                            'opacity': 0.7
+                        }
+                    ).add_to(m)
+                    
+                    # Agregar Etiquetas (Nombres y Volumen)
+                    if ver_nombres:
+                        cen = fila['geometry'].centroid
+                        texto_html = f'''
+                            <div style="font-size: 8pt; color: #333; font-weight: bold; 
+                                        text-shadow: 1px 1px 2px white; text-align: center; width: 120px;">
+                                {fila.get("NOMBRE","")}<br>
+                                <span style="color: #d32f2f; font-size: 7pt;">({int(fila["VOL"])})</span>
+                            </div>
+                        '''
+                        folium.Marker(
+                            location=[cen.y, cen.x],
+                            icon=folium.features.DivIcon(html=texto_html)
+                        ).add_to(m)
