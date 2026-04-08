@@ -125,12 +125,27 @@ if authentication_status:
                             cen = fila['geometry'].centroid
                             texto_html = f'<div style="font-size: 8pt; font-weight: bold; text-align: center; width: 120px;">{fila.get("NOMBRE","")}<br><span style="color: #d32f2f;">({int(fila["VOL"])})</span></div>'
                             folium.Marker([cen.y, cen.x], icon=folium.features.DivIcon(html=texto_html)).add_to(m)
-            else:
-                for _, fila in df_ver.iterrows():
-                    c_c = COLORS.get(fila['RANGO_ID'], "#888")
-                    folium.CircleMarker([fila['LATITUD'], fila['LONGITUD']], radius=8, color="#333", fill=True, fill_color=c_c, fill_opacity=0.8).add_to(m)
 
+            else:
+                # 1. Limpiamos las coordenadas vacías para evitar el error de Folium
+                df_gps = df_ver.dropna(subset=['LATITUD', 'LONGITUD'])
+                
+                # 2. Iteramos solo sobre las coordenadas válidas
+                for _, fila in df_gps.iterrows():
+                    c_c = COLORS.get(fila['RANGO_ID'], "#888")
+                    folium.CircleMarker(
+                        location=[fila['LATITUD'], fila['LONGITUD']], 
+                        radius=8, 
+                        color="#333", 
+                        fill=True, 
+                        fill_color=c_c, 
+                        fill_opacity=0.8,
+                        tooltip=f"{fila.get('NOMBRE', '')} - Vol: {fila.get('VOL', 0)}"
+                    ).add_to(m)
+
+            # 3. Renderizamos el mapa en Streamlit
             st_folium(m, width="100%", height=700, returned_objects=[])
+               
 
 elif authentication_status is False:
     st.error('Usuario/Contraseña incorrectos')
