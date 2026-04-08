@@ -26,7 +26,7 @@ try:
         config = yaml.load(file, Loader=SafeLoader)
     authenticator = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
     name, auth_status, username = authenticator.login(location='main')
-except: st.error("Error de configuración."); st.stop()
+except: st.error("Error de configuración de seguridad."); st.stop()
 
 if auth_status:
     # --- 2. LÓGICA DE PROCESAMIENTO ---
@@ -45,7 +45,6 @@ if auth_status:
         if 'NOM' not in df.columns: df['NOM'] = df.get('CP', 'Punto')
         if 'PER' not in df.columns: df['PER'] = "N/A"
         
-        # Rangos R0-R5 diferenciados
         def asignar_rango(v):
             if v <= 0: return 0
             lim = [100, 200, 300, 400] if "Polígonos" in modo_ref else [15, 20, 30, 40]
@@ -54,7 +53,6 @@ if auth_status:
             return 5
         df['RANGO_ID'] = df['VOL'].apply(asignar_rango)
 
-        # Análisis de Conjunto
         df['COORD_KEY'] = df['LAT'].round(4).astype(str) + "," + df['LON'].round(4).astype(str)
         total_u = df['VOL'].sum()
         df['VOL_CONJUNTO'] = df.groupby('COORD_KEY')['VOL'].transform('sum')
@@ -77,16 +75,12 @@ if auth_status:
     with col_controles:
         st.title("🛡️ Panel AMZL")
         authenticator.logout('Cerrar Sesión', 'sidebar')
-        modo = st.radio("Capa Principal", ["Coordenadas", "Polígonos CP", "Mapa de Calor (Análisis)"])
+        modo = st.radio("Capa Principal", ["Coordenadas", "Polígonos CP", "Mapa de Calor"])
         
         archivo_excel = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
         if archivo_excel and st.button("🔄 Procesar"):
             xl = pd.ExcelFile(archivo_excel)
-            if "Calor" in modo or "Análisis" in modo:
-                st.session_state.dict_datos = {p: normalizar_df(xl.parse(p), modo) for p in xl.sheet_names}
-            else:
-                p1 = xl.sheet_names[0]
-                st.session_state.dict_datos = {p1: normalizar_df(xl.parse(p1), modo)}
+            st.session_state.dict_datos = {p: normalizar_df(xl.parse(p), modo) for p in xl.sheet_names}
             st.rerun()
 
         if st.session_state.dict_datos:
@@ -95,7 +89,6 @@ if auth_status:
             df_act = st.session_state.dict_datos[fecha_sel]
             
             st.markdown("---")
-            st.subheader("📊 Filtros de Rango")
             stats = df_act.groupby('RANGO_ID')['VOL'].agg(['count', 'sum'])
             lbls = ["⚪ R0", "🟡 R1", "🟠 R2", "🔴 R3", "🏮 R4", "🍷 R5"]
             activos = []
@@ -107,7 +100,7 @@ if auth_status:
             ver_nombres = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             archivo_sel = st.selectbox("Mapa Base (GeoJSON)", sorted([f for f in os.listdir('mapas') if f.endswith(('.json', '.geojson'))])) if "Polígonos" in modo else None
 
-    # --- 4. RENDERIZADO DEL MAPA ---
+    # --- 4. RENDERIZADO ---
     with col_mapa:
         if st.session_state.dict_datos:
             df_m = df_act[df_act['RANGO_ID'].isin(activos)].copy()
@@ -124,12 +117,11 @@ if auth_status:
                     merged = gdf.merge(df_m, left_on=col_geo, right_on='CP')
                     for _, f in merged.iterrows():
                         c = COLORS.get(f['RANGO_ID'], "#888")
-                        tooltip = f"<b>{f['PER']}</b><br>Vol: {int(f['VOL'])}<br>Reparto: {f['PORC_INTERNO']}%"
-                        folium.GeoJson(f['geometry'], tooltip=tooltip, style_function=lambda x, col=c: {'fillColor':col, 'color':col, 'fillOpacity':0.4, 'weight':1.5}).add_to(m)
+                        folium.GeoJson(f['geometry'], tooltip=f"<b>{f['PER']}</b><br>Vol: {int(f['VOL'])}",
+                                       style_function=lambda x, col=c: {'fillColor':col, 'color':col, 'fillOpacity':0.4, 'weight':1.5}).add_to(m)
                         if ver_nombres:
-                            folium.Marker([f['geometry'].centroid.y, f['geometry'].centroid.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; color:#000; font-weight:bold; text-align:center; width:100px; text-shadow: 2px 2px 3px #FFF;">{f["PER"]}</div>')).add_to(m)
+                            folium.Marker([f['geometry'].centroid.y, f['geometry'].centroid.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; color:#000; font-weight:bold; text-align:center; width:100px; text-shadow: 1px 1px 2px #FFF;">{f["PER"]}</div>')).add_to(m)
 
-            # Capa de Coordenadas (Círculos)
             if "Polígonos" not in modo:
                 for _, f in df_m.dropna(subset=['LAT', 'LON']).iterrows():
                     c = COLORS.get(f['RANGO_ID'], "#888")
@@ -141,8 +133,7 @@ if auth_status:
 
             if not df_m.empty: m.fit_bounds([[df_m['LAT'].min(), df_m['LON'].min()], [df_m['LAT'].max(), df_m['LON'].max()]])
             
-            # Captura de interacción
-            map_output = st_folium(m, width="100%", height=550, key=f"mapa_{fecha_sel}_{modo}")
+            map_output = st_folium(m, width="100%", height=550, key=f"map_{fecha_sel}_{modo}")
             
             if map_output['last_object_clicked']:
                 lat_c, lon_c = map_output['last_object_clicked']['lat'], map_output['last_object_clicked']['lng']
@@ -159,8 +150,12 @@ if auth_status:
             if st.session_state.zona_seleccionada:
                 zona = st.session_state.zona_seleccionada
                 det = df_m[df_m['NOM'] == zona]
+                # CORRECCIÓN AQUÍ: Usar .iloc[0] para obtener el valor escalar
+                v_conj = det['VOL_CONJUNTO'].iloc[0]
+                p_total = det['PORC_DEL_TOTAL'].iloc[0]
+                
                 c2.success(f"📍 Zona: **{zona}**")
-                c2.write(f"Volumen Conjunto: **{int(det['VOL_CONJUNTO'].iloc)}** ({det['PORC_DEL_TOTAL'].iloc}% del total)")
+                c2.write(f"Volumen Conjunto: **{int(v_conj)}** ({p_total}% del total)")
                 c3.write("**Reparto Interno:**")
                 st.table(det[['PER', 'VOL', 'PORC_INTERNO']].rename(columns={'PORC_INTERNO': '% Reparto'}))
                 if st.button("Limpiar Selección"): st.session_state.zona_seleccionada = None; st.rerun()
@@ -168,7 +163,7 @@ if auth_status:
                 c2.info("👆 Haz clic en un conjunto en el mapa para ver su análisis.")
                 top_p = df_act.groupby('PER')['VOL'].sum().sort_values(ascending=False).head(3)
                 c3.write("**Top 3 Responsables Globales:**")
-                for p, v in top_p.items(): c3.caption(f"{p}: {int(v):,} ({(v/u_total*100 if u_total>0 else 0):.1f}%)")
+                for p, v in top_p.items(): c3.caption(f"{p}: {int(v):,} ({(v/u_total*100 if u_total > 0 else 0):.1f}%)")
 
             st.download_button("💾 Descargar Mapa HTML", data=m._repr_html_().encode('utf-8'), file_name=f"amzl_{fecha_sel}.html", mime="text/html")
 
