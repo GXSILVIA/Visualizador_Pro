@@ -122,9 +122,13 @@ if auth_status:
                             folium.Marker([f['geometry'].centroid.y, f['geometry'].centroid.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; color:#000; font-weight:bold; text-align:center; width:100px; text-shadow: 1px 1px 2px #FFF;">{f["PER"]}</div>')).add_to(m)
 
             if "Polígonos" not in modo:
-                for _, f in df_m.dropna(subset=['LAT', 'LON']).iterrows():
+                # Dibujamos un solo círculo por ubicación para evitar saturación visual si están encimados
+                df_visual = df_m.drop_duplicates('COORD_KEY')
+                for _, f in df_visual.dropna(subset=['LAT', 'LON']).iterrows():
                     c = COLORS.get(f['RANGO_ID'], "#888")
-                    info = f"<b>{f['NOM']}</b><br>Vol. Conjunto: {int(f['VOL_CONJUNTO'])}<br>Clic para Análisis"
+                    # El tooltip ahora avisa si hay varios círculos encimados
+                    n_encimados = len(df_m[df_m['COORD_KEY'] == f['COORD_KEY']])
+                    info = f"<b>Punto:</b> {f['COORD_KEY']}<br><b>Círculos aquí:</b> {n_encimados}<br><b>Vol. Total:</b> {int(f['VOL_CONJUNTO'])}"
                     folium.Circle(location=[f['LAT'], f['LON']], radius=f['RAD'], color=c, fill=True, fill_color=c, fill_opacity=0.3, weight=1.5, tooltip=info, popup=f['NOM']).add_to(m)
                     if ver_nombres:
                         style = 'font-size:8pt; color:#000; font-weight:bold; text-align:center; width:100px; text-shadow: 2px 2px 3px #FFF;'
@@ -134,44 +138,53 @@ if auth_status:
             
             map_output = st_folium(m, width="100%", height=550, key=f"map_{fecha_sel}_{modo}")
             
-            # --- LÓGICA DE SELECCIÓN SEGURA ---
+            # --- LÓGICA DE SELECCIÓN POR COORDENADA (ENCIMADOS) ---
             if map_output.get('last_object_clicked'):
                 lat_c, lon_c = map_output['last_object_clicked']['lat'], map_output['last_object_clicked']['lng']
                 df_m['dist'] = ((df_m['LAT'] - lat_c)**2 + (df_m['LON'] - lon_c)**2)**0.5
-                # Solo asignar si el DataFrame no está vacío tras los filtros de RANGO
                 if not df_m.empty:
-                    st.session_state.zona_seleccionada = df_m.nsmallest(1, 'dist')['NOM'].iloc[0]
+                    # Guardamos la llave de la coordenada para agrupar encimados
+                    st.session_state.zona_seleccionada = df_m.nsmallest(1, 'dist')['COORD_KEY'].iloc[0]
                     st.rerun()
 
-            # --- 5. INFORME EJECUTIVO ---
+            # --- 5. INFORME EJECUTIVO DETALLADO ---
             st.markdown("---")
-            st.markdown(f"### 📋 Informe Ejecutivo - {fecha_sel}")
-            c1, c2, c3 = st.columns([1, 1.5, 1.5])
+            st.markdown(f"### 📋 Informe de Operación - {fecha_sel}")
             u_total = df_m['VOL'].sum()
-            c1.metric("Universo Total", f"{int(u_total):,}")
             
             if st.session_state.zona_seleccionada:
-                zona = st.session_state.zona_seleccionada
-                det = df_m[df_m['NOM'] == zona]
+                # Filtrar todos los círculos que comparten la misma coordenada
+                key_sel = st.session_state.zona_seleccionada
+                det = df_m[df_m['COORD_KEY'] == key_sel]
                 
-                # Verificación extra para evitar IndexError si la zona seleccionada ya no está en el filtro actual
                 if not det.empty:
-                    v_conj = det['VOL_CONJUNTO'].iloc[0]
-                    p_total = det['PORC_DEL_TOTAL'].iloc[0]
+                    v_punto = det['VOL'].sum()
+                    p_global = (v_punto / u_total * 100) if u_total > 0 else 0
+                    nombres_sitio = det['NOM'].unique()
                     
-                    c2.success(f"📍 Zona: **{zona}**")
-                    c2.write(f"Volumen Conjunto: **{int(v_conj)}** ({p_total}% del total)")
-                    c3.write("**Reparto Interno:**")
-                    st.table(det[['PER', 'VOL', 'PORC_INTERNO']].rename(columns={'PORC_INTERNO': '% Reparto'}))
-                    if st.button("Limpiar Selección"): 
-                        st.session_state.zona_seleccionada = None
-                        st.rerun()
+                    c1, c2 = st.columns([1, 2])
+                    with c1:
+                        st.metric("Volumen Total Punto", f"{int(v_punto):,}")
+                        st.metric("% del Universo Total", f"{p_global:.2f}%")
+                        if st.button("🗑️ Limpiar Selección"):
+                            st.session_state.zona_seleccionada = None
+                            st.rerun()
+                    
+                    with c2:
+                        st.write("⚠️ **Círculos detectados en esta área:**")
+                        st.warning(", ".join(nombres_sitio))
+                        st.write("**Desglose de Responsables en el Punto:**")
+                        st.table(det[['NOM', 'PER', 'VOL', 'PORC_INTERNO']].rename(
+                            columns={'NOM': 'Nombre Círculo', 'PER': 'Responsable', 'VOL': 'Vol.', 'PORC_INTERNO': '% Reparto'}
+                        ))
                 else:
                     st.session_state.zona_seleccionada = None
                     st.rerun()
             else:
-                c2.info("👆 Haz clic en un conjunto en el mapa para ver su análisis.")
-                top_p = df_act.groupby('PER')['VOL'].sum().sort_values(ascending=False).head(3)
+                c1, c2, c3 = st.columns([1, 1.5, 1.5])
+                c1.metric("Universo Total", f"{int(u_total):,}")
+                c2.info("👆 Selecciona un punto en el mapa para analizar los círculos encimados.")
+                top_p = df_m.groupby('PER')['VOL'].sum().sort_values(ascending=False).head(3)
                 c3.write("**Top 3 Responsables Globales:**")
                 for p, v in top_p.items(): 
                     c3.caption(f"{p}: {int(v):,} ({(v/u_total*100 if u_total > 0 else 0):.1f}%)")
@@ -180,5 +193,3 @@ if auth_status:
 
 elif auth_status is False: 
     st.error('Credenciales incorrectas')
-
-   
