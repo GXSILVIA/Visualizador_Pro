@@ -99,7 +99,6 @@ if auth_status:
             
             ver_nombres = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             archivo_sel = st.selectbox("Mapa Base (GeoJSON)", sorted([f for f in os.listdir('mapas') if f.endswith(('.json', '.geojson'))])) if "Polígonos" in modo else None
-
     # --- 4. RENDERIZADO ---
     with col_mapa:
         if st.session_state.dict_datos:
@@ -135,10 +134,14 @@ if auth_status:
             
             map_output = st_folium(m, width="100%", height=550, key=f"map_{fecha_sel}_{modo}")
             
-            if map_output['last_object_clicked']:
+            # --- LÓGICA DE SELECCIÓN SEGURA ---
+            if map_output.get('last_object_clicked'):
                 lat_c, lon_c = map_output['last_object_clicked']['lat'], map_output['last_object_clicked']['lng']
                 df_m['dist'] = ((df_m['LAT'] - lat_c)**2 + (df_m['LON'] - lon_c)**2)**0.5
-                st.session_state.zona_seleccionada = df_m.nsmallest(1, 'dist')['NOM'].iloc
+                # Solo asignar si el DataFrame no está vacío tras los filtros de RANGO
+                if not df_m.empty:
+                    st.session_state.zona_seleccionada = df_m.nsmallest(1, 'dist')['NOM'].iloc[0]
+                    st.rerun()
 
             # --- 5. INFORME EJECUTIVO ---
             st.markdown("---")
@@ -150,21 +153,32 @@ if auth_status:
             if st.session_state.zona_seleccionada:
                 zona = st.session_state.zona_seleccionada
                 det = df_m[df_m['NOM'] == zona]
-                # CORRECCIÓN AQUÍ: Usar .iloc[0] para obtener el valor escalar
-                v_conj = det['VOL_CONJUNTO'].iloc[0]
-                p_total = det['PORC_DEL_TOTAL'].iloc[0]
                 
-                c2.success(f"📍 Zona: **{zona}**")
-                c2.write(f"Volumen Conjunto: **{int(v_conj)}** ({p_total}% del total)")
-                c3.write("**Reparto Interno:**")
-                st.table(det[['PER', 'VOL', 'PORC_INTERNO']].rename(columns={'PORC_INTERNO': '% Reparto'}))
-                if st.button("Limpiar Selección"): st.session_state.zona_seleccionada = None; st.rerun()
+                # Verificación extra para evitar IndexError si la zona seleccionada ya no está en el filtro actual
+                if not det.empty:
+                    v_conj = det['VOL_CONJUNTO'].iloc[0]
+                    p_total = det['PORC_DEL_TOTAL'].iloc[0]
+                    
+                    c2.success(f"📍 Zona: **{zona}**")
+                    c2.write(f"Volumen Conjunto: **{int(v_conj)}** ({p_total}% del total)")
+                    c3.write("**Reparto Interno:**")
+                    st.table(det[['PER', 'VOL', 'PORC_INTERNO']].rename(columns={'PORC_INTERNO': '% Reparto'}))
+                    if st.button("Limpiar Selección"): 
+                        st.session_state.zona_seleccionada = None
+                        st.rerun()
+                else:
+                    st.session_state.zona_seleccionada = None
+                    st.rerun()
             else:
                 c2.info("👆 Haz clic en un conjunto en el mapa para ver su análisis.")
                 top_p = df_act.groupby('PER')['VOL'].sum().sort_values(ascending=False).head(3)
                 c3.write("**Top 3 Responsables Globales:**")
-                for p, v in top_p.items(): c3.caption(f"{p}: {int(v):,} ({(v/u_total*100 if u_total > 0 else 0):.1f}%)")
+                for p, v in top_p.items(): 
+                    c3.caption(f"{p}: {int(v):,} ({(v/u_total*100 if u_total > 0 else 0):.1f}%)")
 
             st.download_button("💾 Descargar Mapa HTML", data=m._repr_html_().encode('utf-8'), file_name=f"amzl_{fecha_sel}.html", mime="text/html")
 
-elif auth_status is False: st.error('Credenciales incorrectas')
+elif auth_status is False: 
+    st.error('Credenciales incorrectas')
+
+   
