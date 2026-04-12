@@ -46,7 +46,7 @@ try:
         config = yaml.load(file, Loader=SafeLoader)
     authenticator = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
     name, auth_status, username = authenticator.login(location='main')
-except: st.error("Error en config.yaml o archivo no encontrado"); st.stop()
+except: st.error("Error en config.yaml"); st.stop()
 
 if auth_status:
     def normalizar_df(df, modo_ref):
@@ -54,44 +54,37 @@ if auth_status:
         mapa_cols = {'LAT':['LAT','LATITUD'],'LON':['LON','LONGITUD'],'VOL':['VOL','VOLUMEN'],'RAD':['RADIO','RAD'],'CP':['CP','C.P.'],'NOM':['NOMBRE','ZONA'],'PER':['PERSONA','RESPONSABLE'], 'FEC':['FECHA','DATE']}
         rename_dict = {c: k for k, v in mapa_cols.items() for c in df.columns if c in v}
         df = df.rename(columns=rename_dict)
-        
         for c in ['LAT', 'LON', 'VOL']: df[c] = pd.to_numeric(df.get(c, 0), errors='coerce').fillna(0)
         df['RAD'] = pd.to_numeric(df.get('RAD', 750), errors='coerce').fillna(750)
         if 'FEC' in df.columns: df['FEC'] = pd.to_datetime(df['FEC'], errors='coerce')
         
-        # Corrección CP opcional
+        # Validación CP
         if 'CP' in df.columns:
             df['CP'] = df['CP'].astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(5)
-        else:
-            df['CP'] = '00000'
-            
+        else: df['CP'] = '00000'
+        
         if 'NOM' not in df.columns: df['NOM'] = df.get('CP', 'Punto')
         if 'PER' not in df.columns: df['PER'] = "N/A"
-        
         lim = [100, 200, 300, 400] if "Polígonos" in modo_ref else [15, 20, 30, 40]
         df['RANGO_ID'] = df['VOL'].apply(lambda v: next((i for i, l in enumerate(lim, 1) if v <= l), 5) if v > 0 else 0)
-        df['COORD_KEY'] = df['LAT'].round(4).astype(str) + "," + df['LON'].round(4).astype(str)
         return df
 
-    # --- 3. PANEL LATERAL ---
+    # --- 3. PANEL ---
     col_mapa, col_panel = st.columns([3, 1.3])
     with col_panel:
         st.title("🛡️ Panel AMZL")
         authenticator.logout('Cerrar Sesión', 'sidebar')
         
-        buf_p = io.BytesIO()
-        with pd.ExcelWriter(buf_p, engine='openpyxl') as writer:
-            pd.DataFrame(columns=['LAT', 'LON', 'VOL', 'RAD', 'CP', 'NOMBRE', 'RESPONSABLE', 'FECHA']).to_excel(writer, index=False)
-        st.download_button("📥 Plantilla Excel", data=buf_p.getvalue(), file_name="plantilla_amzl.xlsx", use_container_width=True)
-
         modo = st.radio("Capa Principal", ["Coordenadas", "Polígonos CP"])
         archivo_excel = st.file_uploader("📂 Cargar Datos", type=["xlsx"])
         
         if archivo_excel and st.button("🔄 Procesar"):
             xl = pd.ExcelFile(archivo_excel)
             st.session_state.dict_datos = {p: normalizar_df(xl.parse(p), modo) for p in xl.sheet_names}
-            st.session_state.fec_slider_idx = 0; st.rerun()
+            st.rerun()
 
+        modo_analisis = st.toggle("🔍 Análisis Total", value=False)
+        
         if st.session_state.dict_datos:
             fecha_sel = st.select_slider("🕒 Periodo:", options=list(st.session_state.dict_datos.keys()))
             df_act = st.session_state.dict_datos[fecha_sel].copy()
@@ -99,76 +92,61 @@ if auth_status:
             if 'FEC' in df_act.columns and not df_act['FEC'].dropna().empty:
                 if st.toggle("🕒 Modo Línea de Tiempo"):
                     lista_fec = sorted(df_act['FEC'].dropna().unique())
-                    c_p1, c_p2 = st.columns(2)
-                    if c_p1.button("▶️/⏹️ Play"): st.session_state.reproduciendo = not st.session_state.reproduciendo
                     f_idx = st.session_state.fec_slider_idx
-                    fec_actual = c_p2.select_slider("Fecha", options=lista_fec, value=lista_fec[f_idx], format_func=lambda x: x.strftime('%d/%m'))
-                    if st.session_state.reproduciendo and f_idx < len(lista_fec)-1:
-                        st.session_state.fec_slider_idx += 1; time.sleep(0.3); st.rerun()
-                    else: st.session_state.reproduciendo = False
+                    fec_actual = st.select_slider("Fecha", options=lista_fec, value=lista_fec[f_idx])
                     df_act = df_act[df_act['FEC'] <= fec_actual]
 
-            labels = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
-            activos = []
-            f1, f2 = st.columns(2)
-            for i, l in enumerate(labels):
-                if (f1 if i < 3 else f2).checkbox(l, value=True, key=f"r_{i}_{fecha_sel}"): activos.append(i)
+            activos = [i for i in range(6) if st.checkbox(f"Rango {i}", value=True, key=f"r_{i}_{fecha_sel}")]
             ver_nombres = st.toggle("🏷️ Ver Nombres", value=True)
             archivo_sel = st.selectbox("GeoJSON", sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])) if "Polígonos" in modo else None
 
-    # --- 4. MAPA E INFORME (UNIFICADOS EN COL_MAPA) ---
+    # --- 4. MAPA E INFORME ---
     with col_mapa:
         if st.session_state.dict_datos:
             df_m = df_act[(df_act['LAT'] != 0) & (df_act['LON'] != 0)].copy()
-            center = [df_m['LAT'].mean(), df_m['LON'].mean()] if not df_m.empty else [19.4, -99.1]
-            m = folium.Map(location=center, zoom_start=12, tiles="CartoDB Voyager")
-            
+            m = folium.Map(location=[df_m['LAT'].mean(), df_m['LON'].mean()] if not df_m.empty else [19.4, -99.1], zoom_start=12, tiles="CartoDB Voyager")
             df_vis = df_m[df_m['RANGO_ID'].isin(activos)]
             
+            # --- CÁLCULO DE EMPALMES ---
+            dict_encimados = {}
             if not df_vis.empty:
-                COLORS = {0:"#FFF", 1:"#FF0", 2:"#F90", 3:"#F44", 4:"#F00", 5:"#600"}
-                
-                if "Polígonos" in modo and archivo_sel:
-                    gdf, col_geo = cargar_capa_estado(archivo_sel)
-                    if gdf is not None:
-                        merged = gdf.merge(df_vis, left_on=col_geo, right_on='CP')
-                        for _, f in merged.iterrows():
-                            folium.GeoJson(f['geometry'], style_function=lambda x, c=COLORS.get(f['RANGO_ID'],"#888"): {'fillColor':c, 'color':'#444', 'fillOpacity':0.5, 'weight':1}).add_to(m)
-                else:
-                    for _, f in df_vis.drop_duplicates('COORD_KEY').iterrows():
-                        c = COLORS.get(f['RANGO_ID'], "#888")
-                        folium.Circle([f['LAT'], f['LON']], radius=f['RAD'], color=c, fill=True, fill_opacity=0.3, tooltip=f"<b>{f['NOM']}</b><br>Vol: {f['VOL']}").add_to(m)
-                        if ver_nombres:
-                            folium.Marker([f['LAT'], f['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:black; text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff; width:150px;">{f["PER"]}</div>')).add_to(m)
-                
-                # Solución al RangeError/Error Rojo
-                try:
-                    m.fit_bounds([[df_vis['LAT'].min(), df_vis['LON'].min()], [df_vis['LAT'].max(), df_vis['LON'].max()]])
-                except: pass
-
-            st_folium(m, width="100%", height=450, key=f"m_{fecha_sel}_{modo}")
-            st.download_button("💾 Guardar Mapa HTML", data=m._repr_html_().encode('utf-8'), file_name="mapa_amzl.html", mime="text/html")
-
-            # --- 5. INFORME DE EMPALMES (JUSTO DEBAJO) ---
-            st.markdown("---")
-            st.subheader("📊 Análisis de Empalmes")
-            
-            if not df_vis.empty:
-                data_informe = []
                 puntos = df_vis.to_dict('records')
                 for i, p1 in enumerate(puntos):
                     area_p1 = np.pi * (p1['RAD']**2)
-                    area_cubierta = 0
+                    area_cubierta, encimado_con = 0, []
                     for j, p2 in enumerate(puntos):
                         if i == j: continue
-                        # Distancia haversine simplificada a metros
                         dist = np.sqrt((p1['LAT']-p2['LAT'])**2 + (p1['LON']-p2['LON'])**2) * 111139
-                        area_cubierta += area_interseccion(p1['RAD'], p2['RAD'], dist)
+                        if dist < (p1['RAD'] + p2['RAD']):
+                            a_int = area_interseccion(p1['RAD'], p2['RAD'], dist)
+                            if a_int > 0:
+                                area_cubierta += a_int
+                                encimado_con.append(p2['PER'])
                     
                     porc = min(100, (area_cubierta / area_p1) * 100)
-                    color = "🔴" if porc > 50 else "🟡" if porc > 20 else "🟢"
-                    data_informe.append({"Estatus": color, "Responsable": p1['PER'], "Zona": p1['NOM'], "Volumen": p1['VOL'], "% Encimado": f"{porc:.1f}%"})
-                
-                st.table(pd.DataFrame(data_informe))
-            else:
-                st.info("Seleccione rangos para ver el análisis.")
+                    dict_encimados[p1['PER']] = {"Estatus": "🔴" if porc > 50 else "🟡" if porc > 15 else "🟢", "Porc": round(porc, 1), "Con": ", ".join(list(set(encimado_con))) if encimado_con else "Nadie"}
+
+                # --- DIBUJAR ---
+                COLORS = {0:"#FFF", 1:"#FF0", 2:"#F90", 3:"#F44", 4:"#F00", 5:"#600"}
+                for _, f in df_vis.iterrows():
+                    res = dict_encimados.get(f['PER'], {"Porc": 0})
+                    color_txt = "red" if res["Porc"] > 50 else "black"
+                    folium.Circle([f['LAT'], f['LON']], radius=f['RAD'], color=COLORS.get(f['RANGO_ID'], "#888"), fill=True, fill_opacity=0.3).add_to(m)
+                    if ver_nombres:
+                        folium.Marker([f['LAT'], f['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:{color_txt}; text-shadow: -1px -1px 0 #fff; width:150px;">{f["PER"]}</div>')).add_to(m)
+
+                try: m.fit_bounds([[df_vis['LAT'].min(), df_vis['LON'].min()], [df_vis['LAT'].max(), df_vis['LON'].max()]])
+                except: pass
+
+            st_folium(m, width="100%", height=500, key=f"m_{fecha_sel}")
+
+            # --- INFORME ---
+            if modo_analisis:
+                st.markdown("### 📊 Análisis de Empalmes")
+                if dict_encimados:
+                    df_rep = pd.DataFrame([{"Estatus": v["Estatus"], "Responsable": k, "% Encimado": f"{v['Porc']}%", "Encimado con": v["Con"]} for k, v in dict_encimados.items()])
+                    
+                    buf = io.BytesIO()
+                    with pd.ExcelWriter(buf, engine='openpyxl') as writer: df_rep.to_excel(writer, index=False)
+                    st.download_button("📥 Descargar Reporte Excel", data=buf.getvalue(), file_name=f"analisis_{fecha_sel}.xlsx", use_container_width=True)
+                    st.table(df_rep)
