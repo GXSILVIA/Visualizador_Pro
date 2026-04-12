@@ -174,7 +174,9 @@ if auth_status:
 
             # KEY DINÁMICO PARA ANIMACIÓN
             m_key = f"map_{st.session_state.fec_slider_idx}" if st.session_state.reproduciendo else "map_fixed"
-            st_folium(m, width="100%", height=550, key=m_key)
+# Usar un KEY fijo elimina el parpadeo porque el navegador no destruye el mapa
+            st_folium(m, width="100%", height=550, key="mapa_fijo_amzl")
+
             
             # DESCARGAS
             c_d1, c_d2 = st.columns(2)
@@ -189,14 +191,15 @@ if auth_status:
                     st.download_button("📊 Informe Excel", data=buf_r.getvalue(), file_name="analisis.xlsx", use_container_width=True)
             if modo_analisis and dict_reporte: st.table(pd.DataFrame(dict_reporte))
 
-    # --- LÓGICA REPRODUCCIÓN (REUBICADA PARA FLUIDEZ) ---
-    if st.session_state.reproduciendo:
-        f_v = sorted(st.session_state.dict_datos[fecha_sel]['FEC'].dropna().unique())
-        if st.session_state.fec_slider_idx < len(f_v) - 1:
-            st.session_state.fec_slider_idx += 1
-            time.sleep(1/vel)
-            st.rerun()
-        else:
-            st.session_state.reproduciendo = False
-            st.rerun()
+   # --- LÓGICA REPRODUCCIÓN (AL FINAL) ---
+if st.session_state.reproduciendo:
+    f_v = sorted(st.session_state.dict_datos[fecha_sel]['FEC'].dropna().unique())
+    if st.session_state.fec_slider_idx < len(f_v) - 1:
+        st.session_state.fec_slider_idx += 1
+        # Un valor de 0.1 a 0.3 hace que la transición sea casi instantánea
+        time.sleep(0.3 / vel) 
+        st.rerun()
+    else:
+        st.session_state.reproduciendo = False
+        st.rerun()
 
