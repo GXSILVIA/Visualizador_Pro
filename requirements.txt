@@ -7,3 +7,5 @@ openpyxl==3.1.2
 pyyaml==6.0.2
 bcrypt==4.1.2
 streamlit-authenticator==0.3.2
+numpy
+
