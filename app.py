@@ -191,13 +191,14 @@ if auth_status:
                     st.download_button("📊 Informe Excel", data=buf_r.getvalue(), file_name="analisis.xlsx", use_container_width=True)
             if modo_analisis and dict_reporte: st.table(pd.DataFrame(dict_reporte))
 
-   # --- LÓGICA REPRODUCCIÓN (AL FINAL) ---
+  # 2. Cambia la lógica de reproducción por esta (Añadimos un validador de estado):
 if st.session_state.reproduciendo:
     f_v = sorted(st.session_state.dict_datos[fecha_sel]['FEC'].dropna().unique())
     if st.session_state.fec_slider_idx < len(f_v) - 1:
         st.session_state.fec_slider_idx += 1
-        # Un valor de 0.1 a 0.3 hace que la transición sea casi instantánea
-        time.sleep(0.3 / vel) 
+        # IMPORTANTE: Un tiempo muy corto (menos de 0.5) causa parpadeo 
+        # porque el navegador no termina de dibujar cuando ya le pides otro.
+        time.sleep(1.0 / vel) 
         st.rerun()
     else:
         st.session_state.reproduciendo = False
