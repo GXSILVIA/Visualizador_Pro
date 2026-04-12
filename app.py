@@ -37,7 +37,7 @@ def cargar_capa_estado(archivo):
     if os.path.exists(ruta):
         gdf = gpd.read_file(ruta).to_crs("EPSG:4326")
         gdf['geometry'] = gdf['geometry'].simplify(0.002)
-        col_geo = next((p for p in ['d_cp', 'CP', 'CODIGOPOSTAL', 'ZONA'] if p in gdf.columns), gdf.columns)
+        col_geo = next((p for p in ['d_cp', 'CP', 'CODIGOPOSTAL', 'ZONA'] if p in gdf.columns), gdf.columns[0])
         return gdf, col_geo
     return None, None
 
@@ -59,10 +59,8 @@ if auth_status:
         df['LON'] = pd.to_numeric(df.get('LON', 0), errors='coerce').fillna(0)
         df['VOL'] = pd.to_numeric(df.get('VOL', 0), errors='coerce').fillna(0)
         df['RAD'] = pd.to_numeric(df.get('RAD', 750), errors='coerce').fillna(750)
-        if 'FEC' in df.columns:
-            df['FEC'] = pd.to_datetime(df['FEC'], errors='coerce')
-        if 'CP' in df.columns:
-            df['CP'] = df['CP'].astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(5)
+        if 'FEC' in df.columns: df['FEC'] = pd.to_datetime(df['FEC'], errors='coerce')
+        if 'CP' in df.columns: df['CP'] = df['CP'].astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(5)
         else: df['CP'] = '00000'
         if 'NOM' not in df.columns: df['NOM'] = df['CP']
         if 'PER' not in df.columns: df['PER'] = "N/A"
@@ -102,13 +100,10 @@ if auth_status:
                 usa_tiempo = st.toggle("🕒 Modo Línea de Tiempo")
                 if usa_tiempo:
                     lista_fec = sorted(df_act['FEC'].dropna().unique())
-                    col_p1, col_p2 = st.columns([1,2])
-                    
+                    col_p1, col_p2 = st.columns(2)
                     if col_p1.button("▶️ Play" if not st.session_state.reproduciendo else "⏹️ Stop"):
                         st.session_state.reproduciendo = not st.session_state.reproduciendo
-                    
                     fec_actual = col_p2.select_slider("Fecha:", options=lista_fec, value=lista_fec[st.session_state.fec_slider_idx], format_func=lambda x: x.strftime('%d/%m/%Y'))
-                    
                     if st.session_state.reproduciendo:
                         if st.session_state.fec_slider_idx < len(lista_fec) - 1:
                             st.session_state.fec_slider_idx += 1
@@ -117,7 +112,6 @@ if auth_status:
                         else:
                             st.session_state.reproduciendo = False
                             mostrar_resumen_fec = True
-                    
                     df_act = df_act[df_act['FEC'] <= fec_actual]
 
             modo_analisis = st.toggle("🔍 Análisis Intersección Total", value=False)
@@ -126,7 +120,6 @@ if auth_status:
             f1, f2 = st.columns(2)
             for i in range(6):
                 if (f1 if i < 3 else f2).checkbox(labels[i], value=True, key=f"r_{i}_{fecha_sel}"): activos.append(i)
-            
             ver_nombres = st.toggle("🏷️ Ver Nombres", value=True)
             archivo_sel = st.selectbox("GeoJSON Base", sorted([f for f in os.listdir('mapas') if f.endswith(('.json', '.geojson'))])) if "Polígonos" in modo else None
 
@@ -144,36 +137,32 @@ if auth_status:
                         merged = gdf.merge(df_m, left_on=col_geo, right_on='CP')
                         for _, f in merged.iterrows():
                             c = COLORS.get(f['RANGO_ID'], "#888")
-                            folium.GeoJson(f['geometry'], style_function=lambda x, col=c: {'fillColor':col, 'color':'#444', 'fillOpacity':0.5, 'weight':1}).add_to(m)
+                            folium.GeoJson(f['geometry'], style_function=lambda x, col=c: {'fillColor':col, 'color':'#444', 'fillOpacity':0.5, 'weight':1}, tooltip=f"CP: {f['CP']} | Vol: {f['VOL']}").add_to(m)
                 else:
                     for _, f in df_m.drop_duplicates('COORD_KEY').iterrows():
                         c = COLORS.get(f['RANGO_ID'], "#888")
-                        folium.Circle([f['LAT'], f['LON']], radius=f['RAD'], color=c, fill=True, fill_opacity=0.3, tooltip=f"Vol: {f['VOL']}").add_to(m)
-                
-                if ver_nombres and "Polígonos" not in modo:
-                    for _, f in df_m.drop_duplicates('COORD_KEY').iterrows():
-                        folium.Marker([f['LAT'], f['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:black; text-shadow: 1px 1px 2px white; width:150px;">{f["PER"]}</div>')).add_to(m)
-                
+                        folium.Circle([f['LAT'], f['LON']], radius=f['RAD'], color=c, fill=True, fill_opacity=0.3, tooltip=f"<b>{f['NOM']}</b><br>Vol: {f['VOL']}").add_to(m)
+                        if ver_nombres:
+                            folium.Marker([f['LAT'], f['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:black; text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff; width:150px;">{f["PER"]}</div>')).add_to(m)
                 if df_m['LAT'].nunique() > 1: m.fit_bounds([[df_m['LAT'].min(), df_m['LON'].min()], [df_m['LAT'].max(), df_m['LON'].max()]])
 
             map_out = st_folium(m, width="100%", height=500, key=f"map_{fecha_sel}_{modo}")
             st.download_button("💾 Descargar Mapa HTML", data=m._repr_html_().encode('utf-8'), file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
-
             if map_out.get('last_object_clicked'):
                 lc = map_out['last_object_clicked']
                 df_act['d_t'] = ((df_act['LAT']-lc['lat'])**2 + (df_act['LON']-lc['lng'])**2)**0.5
                 st.session_state.zona_seleccionada = df_act.nsmallest(1, 'd_t')['COORD_KEY'].iloc[0]
                 st.rerun()
 
-    # --- 4. INFORME Y RESUMEN ---
+    # --- 4. INFORME Y EVOLUCIÓN ---
     if st.session_state.dict_datos:
-        # Resumen final de tiempo
         if mostrar_resumen_fec or (st.session_state.fec_slider_idx == len(lista_fec)-1 if 'lista_fec' in locals() else False):
-            st.success("✅ Reproducción completa: Resumen de evolución temporal")
+            st.success("✅ **Resumen de Evolución Temporal**")
             c1, c2, c3 = st.columns(3)
-            c1.metric("Volumen Total Acumulado", int(df_act['VOL'].sum()))
-            c2.metric("Puntos Operativos", df_act['COORD_KEY'].nunique())
-            c3.metric("Responsables Activos", df_act['PER'].nunique())
+            c1.metric("**Volumen Total**", int(df_act['VOL'].sum()))
+            c2.metric("**Puntos Operativos**", df_act['COORD_KEY'].nunique())
+            c3.metric("**Responsables**", df_act['PER'].nunique())
+            st.line_chart(df_act.groupby('FEC')['VOL'].sum())
         
         st.markdown("---")
         df_base = df_act if modo_analisis else df_m
@@ -185,7 +174,6 @@ if auth_status:
                 df_c['dist_m'] = (((df_c['LAT'] - m_r['LAT'])**2 + (df_c['LON'] - m_r['LON'])**2)**0.5) * 111139
                 df_c['%_ENCIMADO'] = df_c.apply(lambda r: (area_interseccion(m_r['RAD'], r['RAD'], r['dist_m']) / (np.pi * min(m_r['RAD'], r['RAD'])**2)) * 100, axis=1)
                 df_rep = df_c[df_c['%_ENCIMADO'] >= 30].sort_values('%_ENCIMADO', ascending=False)
-                
                 st.subheader(f"📊 Análisis: {m_r['NOM']}")
                 r1, r2 = st.columns(2)
                 with r1:
