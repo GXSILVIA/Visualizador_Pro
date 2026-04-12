@@ -93,37 +93,33 @@ if auth_status:
             xl = pd.ExcelFile(archivo_excel)
             st.session_state.dict_datos = {p: normalizar_df(xl.parse(p), modo) for p in xl.sheet_names}
             st.session_state.fec_slider_idx = 0
+            st.session_state.reproduciendo = False
             st.rerun()
 
+        # CONTROLES SIEMPRE VISIBLES
         if st.session_state.dict_datos:
             lista_p = list(st.session_state.dict_datos.keys())
             fecha_sel = st.select_slider("🕒 Pestaña:", options=lista_p) if len(lista_p) > 1 else lista_p[0]
             df_act = st.session_state.dict_datos[fecha_sel].copy()
             
-            # --- LÓGICA DE TIEMPO (REPRODUCCIÓN FLUIDA) ---
+            # --- CONTROL DE TIEMPO (PLAY) ---
+            vel = 1.0
             if modo == "Línea de Tiempo" and 'FEC' in df_act.columns:
                 f_v = sorted(df_act['FEC'].dropna().unique())
                 if len(f_v) > 1:
-                    st.write("### 🎬 Control de Tiempo")
-                    c1, c2, c3 = st.columns([1,1,2])
+                    st.write("### 🎬 Modo Cine")
+                    c1, c2, c3 = st.columns(3)
                     if c1.button("▶️ Play"): st.session_state.reproduciendo = True
                     if c2.button("⏸️ Stop"): st.session_state.reproduciendo = False
-                    vel = c3.select_slider("Vel:", options=[0.5, 1.0, 2.0, 4.0], value=2.0)
+                    vel = c3.select_slider("Vel:", options=[0.5, 1.0, 2.0, 4.0], value=1.0, label_visibility="collapsed")
                     
-                    st.session_state.fec_slider_idx = st.select_slider("Historial:", options=range(len(f_v)), 
+                    st.session_state.fec_slider_idx = st.select_slider("Periodo:", options=range(len(f_v)), 
                                                                       format_func=lambda x: f_v[x].strftime('%Y-%m-%d'),
                                                                       value=st.session_state.fec_slider_idx)
                     df_act = df_act[df_act['FEC'] <= f_v[st.session_state.fec_slider_idx]]
-                    
-                    if st.session_state.reproduciendo:
-                        if st.session_state.fec_slider_idx < len(f_v) - 1:
-                            st.session_state.fec_slider_idx += 1
-                            time.sleep(1/vel)
-                            st.rerun()
-                        else: st.session_state.reproduciendo = False
-                elif len(f_v) == 1: st.info(f"Fecha: {f_v[0].date()}")
 
             st.write("---")
+            # RANGOS 3x3
             labels = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
             activos = []
             cols_r = st.columns(3)
@@ -131,7 +127,7 @@ if auth_status:
                 with cols_r[i % 3]:
                     if st.checkbox(lab, value=True, key=f"r_{i}_{fecha_sel}"): activos.append(i)
 
-            ver_nombres = st.toggle("🏷️ Nombres Fijos", value=True)
+            ver_nombres = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             modo_analisis = st.toggle("🔍 Tabla de Análisis", value=False)
             archivo_geojson = st.selectbox("🗺️ GeoJSON", sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])) if "Polígonos" in modo else None
 
@@ -156,7 +152,6 @@ if auth_status:
             df_coords = df_vis[(df_vis['LAT'] != 0) & (df_vis['LON'] != 0)]
             dict_reporte = []
             if not df_coords.empty:
-                # AUTO-CENTRADADO DINÁMICO
                 m.fit_bounds([df_coords[['LAT', 'LON']].min().values.tolist(), df_coords[['LAT', 'LON']].max().values.tolist()])
                 pts = df_coords.to_dict('records')
                 for i, p1 in enumerate(pts):
@@ -177,18 +172,31 @@ if auth_status:
                         folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:black; text-shadow: 0px 0px 3px white; width:150px; pointer-events:none;">{p1["NOM"]}</div>')).add_to(m)
                     dict_reporte.append({"Estatus": "🔴" if total_p > 50 else "🟡" if total_p > 15 else "🟢", "Zona": p1['NOM'], "% Traslape Total": f"{round(min(100, total_p), 1)}%", "Empalmado con": ", ".join(choques) if choques else "Sin traslape"})
 
-            # KEY ESTÁTICO: Clave para eliminar el parpadeo durante el Play
-            st_folium(m, width="100%", height=550, key="mapa_operativo_amzl")
+            # KEY DINÁMICO PARA ANIMACIÓN
+            m_key = f"map_{st.session_state.fec_slider_idx}" if st.session_state.reproduciendo else "map_fixed"
+            st_folium(m, width="100%", height=550, key=m_key)
             
-            # --- 4. DESCARGAS ---
+            # DESCARGAS
             c_d1, c_d2 = st.columns(2)
             with c_d1:
                 map_io = io.BytesIO()
                 m.save(map_io, close_file=False)
-                st.download_button("🗺️ Descargar Mapa HTML", data=map_io.getvalue(), file_name=f"mapa_{modo.lower()}.html", use_container_width=True)
+                st.download_button("🗺️ Mapa HTML", data=map_io.getvalue(), file_name="mapa_amzl.html", use_container_width=True)
             with c_d2:
                 if dict_reporte:
                     buf_r = io.BytesIO()
                     pd.DataFrame(dict_reporte).to_excel(buf_r, index=False)
-                    st.download_button("📊 Descargar Informe Excel", data=buf_r.getvalue(), file_name=f"analisis_{fecha_sel}.xlsx", use_container_width=True)
+                    st.download_button("📊 Informe Excel", data=buf_r.getvalue(), file_name="analisis.xlsx", use_container_width=True)
             if modo_analisis and dict_reporte: st.table(pd.DataFrame(dict_reporte))
+
+    # --- LÓGICA REPRODUCCIÓN (REUBICADA PARA FLUIDEZ) ---
+    if st.session_state.reproduciendo:
+        f_v = sorted(st.session_state.dict_datos[fecha_sel]['FEC'].dropna().unique())
+        if st.session_state.fec_slider_idx < len(f_v) - 1:
+            st.session_state.fec_slider_idx += 1
+            time.sleep(1/vel)
+            st.rerun()
+        else:
+            st.session_state.reproduciendo = False
+            st.rerun()
+
