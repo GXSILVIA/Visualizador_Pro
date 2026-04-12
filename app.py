@@ -37,7 +37,7 @@ def cargar_capa_estado(archivo):
     if os.path.exists(ruta):
         gdf = gpd.read_file(ruta).to_crs("EPSG:4326")
         gdf['geometry'] = gdf['geometry'].simplify(0.002)
-        col_geo = next((p for p in ['d_cp', 'CP', 'CODIGOPOSTAL', 'ZONA'] if p in gdf.columns), gdf.columns)
+        col_geo = next((p for p in ['d_cp', 'CP', 'CODIGOPOSTAL', 'ZONA'] if p in gdf.columns), gdf.columns[0])
         return gdf, col_geo
     return None, None
 
@@ -47,7 +47,7 @@ try:
         config = yaml.load(file, Loader=SafeLoader)
     authenticator = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
     name, auth_status, username = authenticator.login(location='main')
-except: st.error("Revisar config.yaml"); st.stop()
+except: st.error("Error en config.yaml"); st.stop()
 
 if auth_status:
     def normalizar_df(df, modo_ref):
@@ -70,8 +70,8 @@ if auth_status:
         df['COORD_KEY'] = df['LAT'].round(4).astype(str) + "," + df['LON'].round(4).astype(str)
         return df
 
-    # --- 3. DISEÑO: MAPA Y PANEL SUPERIOR ---
-    col_mapa, col_panel = st.columns([3, 1.3])
+    # --- 3. PANEL DE CONTROL ---
+    col_mapa, col_panel = st.columns([3, 1.2])
 
     with col_panel:
         st.title("🛡️ Panel AMZL")
@@ -80,7 +80,7 @@ if auth_status:
         buf_p = io.BytesIO()
         with pd.ExcelWriter(buf_p, engine='openpyxl') as writer:
             pd.DataFrame(columns=['LAT', 'LON', 'VOL', 'RAD', 'CP', 'NOMBRE', 'RESPONSABLE', 'FECHA']).to_excel(writer, index=False)
-        st.download_button("📥 Descargar Plantilla", data=buf_p.getvalue(), file_name="plantilla_amzl.xlsx", use_container_width=True)
+        st.download_button("📥 Plantilla", data=buf_p.getvalue(), file_name="plantilla_amzl.xlsx", use_container_width=True)
 
         modo = st.radio("Capa Principal", ["Coordenadas", "Polígonos CP"])
         archivo_excel = st.file_uploader("📂 Cargar Datos", type=["xlsx"])
@@ -96,20 +96,15 @@ if auth_status:
             df_act = st.session_state.dict_datos[fecha_sel]
             
             if 'FEC' in df_act.columns and not df_act['FEC'].dropna().empty:
-                st.markdown("---")
                 if st.toggle("🕒 Modo Línea de Tiempo"):
                     lista_fec = sorted(df_act['FEC'].dropna().unique())
-                    c_play, c_slid = st.columns([1, 2])
-                    if c_play.button("▶️/⏹️ Play"):
-                        st.session_state.reproduciendo = not st.session_state.reproduciendo
-                    
+                    c_play, c_slid = st.columns(2)
+                    if c_play.button("▶️/⏹️ Play"): st.session_state.reproduciendo = not st.session_state.reproduciendo
                     fec_actual = c_slid.select_slider("Progreso:", options=lista_fec, value=lista_fec[st.session_state.fec_slider_idx], format_func=lambda x: x.strftime('%d/%m/%Y'))
-                    
                     if st.session_state.reproduciendo:
                         if st.session_state.fec_slider_idx < len(lista_fec) - 1:
                             st.session_state.fec_slider_idx += 1
-                            time.sleep(0.3)
-                            st.rerun()
+                            time.sleep(0.3); st.rerun()
                         else: st.session_state.reproduciendo = False
                     df_act = df_act[df_act['FEC'] <= fec_actual]
 
@@ -120,11 +115,11 @@ if auth_status:
             for i in range(6):
                 if (f1 if i < 3 else f2).checkbox(labels[i], value=True, key=f"r_{i}_{fecha_sel}"): activos.append(i)
             ver_nombres = st.toggle("🏷️ Ver Nombres", value=True)
-            archivo_sel = st.selectbox("GeoJSON Base", sorted([f for f in os.listdir('mapas') if f.endswith(('.json', '.geojson'))])) if "Polígonos" in modo else None
+            archivo_sel = st.selectbox("GeoJSON", sorted([f for f in os.listdir('mapas') if f.endswith(('.json', '.geojson'))])) if "Polígonos" in modo else None
 
     with col_mapa:
         if st.session_state.dict_datos:
-            df_m = df_act[(df_act['RANGO_ID'].isin(activos)) & (df_act['LAT'] != 0) & (df_act['LON'] != 0)].copy()
+            df_m = df_act[(df_act['RANGO_ID'].isin(activos)) & (df_act['LAT'] != 0)].copy()
             center = [df_act['LAT'].mean(), df_act['LON'].mean()] if not df_act.empty else [19.43, -99.13]
             m = folium.Map(location=center, zoom_start=12, tiles="CartoDB Voyager")
             COLORS = {0:"#FFFFFF", 1:"#FFFF00", 2:"#FF9900", 3:"#FF4444", 4:"#FF0000", 5:"#660000"}
@@ -144,7 +139,7 @@ if auth_status:
                         if ver_nombres:
                             folium.Marker([f['LAT'], f['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:black; text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff; width:150px;">{f["PER"]}</div>')).add_to(m)
                 
-                if df_m['LAT'].nunique() > 1:
+                if len(df_m) > 1 and df_m['LAT'].nunique() > 1:
                     m.fit_bounds([[df_m['LAT'].min(), df_m['LON'].min()], [df_m['LAT'].max(), df_m['LON'].max()]])
 
             map_out = st_folium(m, width="100%", height=500, key=f"map_{fecha_sel}_{modo}")
@@ -156,19 +151,9 @@ if auth_status:
                 st.session_state.zona_seleccionada = df_act.nsmallest(1, 'd_t')['COORD_KEY'].iloc[0]
                 st.rerun()
 
-    # --- 4. INFORME DEBAJO DEL MAPA (Ancho Completo) ---
+    # --- 4. INFORME ---
     if st.session_state.dict_datos:
         st.markdown("---")
-        # Resumen final de línea de tiempo
-        if 'lista_fec' in locals() and st.session_state.fec_slider_idx == len(lista_fec)-1:
-            st.success("✅ **Resumen Final de Evolución**")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("**Volumen Total**", int(df_act['VOL'].sum()))
-            c2.metric("**Puntos Operativos**", df_act['COORD_KEY'].nunique())
-            c3.metric("**Responsables**", df_act['PER'].nunique())
-            st.line_chart(df_act.groupby('FEC')['VOL'].sum())
-            st.markdown("---")
-        
         df_base = df_act if modo_analisis else df_m
         if st.session_state.zona_seleccionada:
             sel = df_act[df_act['COORD_KEY'] == st.session_state.zona_seleccionada]
@@ -180,19 +165,23 @@ if auth_status:
                 df_rep = df_c[df_c['%_ENCIMADO'] >= 30].sort_values('%_ENCIMADO', ascending=False)
                 
                 st.subheader(f"📊 Análisis Detallado: {m_r['NOM']}")
-                r1, r2 = st.columns(2)
-                with r1:
-                    st.write("**Volumen por Responsable en el Área:**")
+                c1, c2 = st.columns(2)
+                with c1:
                     st.bar_chart(df_rep.groupby('PER')['VOL'].sum())
-                    if st.button("🗑️ Limpiar Selección"): 
-                        st.session_state.zona_seleccionada = None
-                        st.rerun()
-                with r2:
+                    if st.button("🗑️ Limpiar"): st.session_state.zona_seleccionada = None; st.rerun()
+                with c2:
                     def est(v): return 'background-color: #721c24; color: white' if v >= 99 else ('background-color: #ff4b4b' if v >= 80 else ('background-color: #ffa500' if v >= 50 else 'background-color: #f1c40f'))
-                    st.write("**Tabla de Traslapes:**")
                     st.dataframe(df_rep[['NOM', 'PER', 'VOL', '%_ENCIMADO']].style.applymap(est, subset=['%_ENCIMADO']).format({'%_ENCIMADO': '{:.1f}%'}), use_container_width=True)
-        else:
-            st.info("👆 Selecciona un punto en el mapa para ver el desglose de traslapes aquí abajo.")
+            
+            if 'lista_fec' in locals() and st.session_state.fec_slider_idx == len(lista_fec)-1:
+                st.markdown("---")
+                st.success("✅ **Resumen Final de Evolución**")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("**Volumen Total**", int(df_act['VOL'].sum()))
+                m2.metric("**Puntos**", df_act['COORD_KEY'].nunique())
+                m3.metric("**Responsables**", df_act['PER'].nunique())
+                st.line_chart(df_act.groupby('FEC')['VOL'].sum())
+        else: st.info("👆 Selecciona un punto para analizar traslapes.")
 
 elif auth_status is False: st.error('Usuario/Contraseña incorrectos')
 elif auth_status is None: st.warning('Ingrese credenciales')
