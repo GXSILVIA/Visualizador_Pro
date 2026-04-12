@@ -7,27 +7,39 @@ import folium
 from folium.plugins import HeatMap
 import geopandas as gpd
 import os
+import io
 import yaml
 import numpy as np
+import time
 from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
 from streamlit_folium import st_folium
 
-# --- 1. CONFIGURACIÓN Y FUNCIONES MATEMÁTICAS ---
+# --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="Sistema Pro AMZL", layout="wide")
 
 if 'dict_datos' not in st.session_state: st.session_state.dict_datos = {}
-if 'map_center' not in st.session_state: st.session_state.map_center = [19.4326, -99.1332]
 if 'zona_seleccionada' not in st.session_state: st.session_state.zona_seleccionada = None
+if 'reproduciendo' not in st.session_state: st.session_state.reproduciendo = False
+if 'fec_slider_idx' not in st.session_state: st.session_state.fec_slider_idx = 0
 
 def area_interseccion(r1, r2, d):
-    """Cálculo geométrico de intersección de dos círculos."""
     if d >= r1 + r2: return 0.0
     if d <= abs(r1 - r2): return np.pi * min(r1, r2)**2
-    p1 = r1**2 * np.arccos((d**2 + r1**2 - r2**2) / (2 * d * r1))
-    p2 = r2**2 * np.arccos((d**2 + r2**2 - r1**2) / (2 * d * r2))
+    p1 = r1**2 * np.arccos(np.clip((d**2 + r1**2 - r2**2) / (2 * d * r1), -1, 1))
+    p2 = r2**2 * np.arccos(np.clip((d**2 + r2**2 - r1**2) / (2 * d * r2), -1, 1))
     p3 = 0.5 * np.sqrt(max(0, (-d + r1 + r2) * (d + r1 - r2) * (d - r1 + r2) * (d + r1 + r2)))
     return p1 + p2 - p3
+
+@st.cache_data
+def cargar_capa_estado(archivo):
+    ruta = f"mapas/{archivo}"
+    if os.path.exists(ruta):
+        gdf = gpd.read_file(ruta).to_crs("EPSG:4326")
+        gdf['geometry'] = gdf['geometry'].simplify(0.002)
+        col_geo = next((p for p in ['d_cp', 'CP', 'CODIGOPOSTAL', 'ZONA'] if p in gdf.columns), gdf.columns[0])
+        return gdf, col_geo
+    return None, None
 
 # --- 2. SEGURIDAD ---
 try:
@@ -35,120 +47,136 @@ try:
         config = yaml.load(file, Loader=SafeLoader)
     authenticator = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
     name, auth_status, username = authenticator.login(location='main')
-except: 
-    st.error("Error de configuración de seguridad."); st.stop()
+except: st.error("Error en config.yaml"); st.stop()
 
 if auth_status:
     def normalizar_df(df, modo_ref):
         df.columns = df.columns.str.strip().str.upper()
-        mapa = {'LAT':['LAT','LATITUD'],'LON':['LON','LONGITUD'],'VOL':['VOL','VOLUMEN'],'RAD':['RADIO','RAD'],'CP':['CP','C.P.'],'NOM':['NOMBRE','ZONA'],'PER':['PERSONA','RESPONSABLE']}
+        mapa = {'LAT':['LAT','LATITUD'],'LON':['LON','LONGITUD'],'VOL':['VOL','VOLUMEN'],'RAD':['RADIO','RAD'],'CP':['CP','C.P.'],'NOM':['NOMBRE','ZONA'],'PER':['PERSONA','RESPONSABLE'], 'FEC':['FECHA','DATE']}
         rename_dict = {c: k for k, v in mapa.items() for c in df.columns if c in v}
         df = df.rename(columns=rename_dict)
-        df['VOL'] = pd.to_numeric(df.get('VOL',0), errors='coerce').fillna(0)
-        df['RAD'] = pd.to_numeric(df.get('RAD',750), errors='coerce').fillna(750)
+        for c in ['LAT', 'LON', 'VOL']: df[c] = pd.to_numeric(df.get(c, 0), errors='coerce').fillna(0)
+        df['RAD'] = pd.to_numeric(df.get('RAD', 750), errors='coerce').fillna(750)
+        if 'FEC' in df.columns: df['FEC'] = pd.to_datetime(df['FEC'], errors='coerce')
+        df['CP'] = df.get('CP', '0').astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(5)
         if 'NOM' not in df.columns: df['NOM'] = df.get('CP', 'Punto')
         if 'PER' not in df.columns: df['PER'] = "N/A"
         
-        def asignar_rango(v):
-            if v <= 0: return 0
-            lim = [100, 200, 300, 400] if "Polígonos" in modo_ref else [15, 20, 30, 40]
-            for i, l in enumerate(lim, 1):
-                if v <= l: return i
-            return 5
-        df['RANGO_ID'] = df['VOL'].apply(asignar_rango)
+        lim = [100, 200, 300, 400] if "Polígonos" in modo_ref else [15, 20, 30, 40]
+        df['RANGO_ID'] = df['VOL'].apply(lambda v: next((i for i, l in enumerate(lim, 1) if v <= l), 5) if v > 0 else 0)
         df['COORD_KEY'] = df['LAT'].round(4).astype(str) + "," + df['LON'].round(4).astype(str)
         return df
 
-    # --- 3. PANEL DE CONTROL ---
-    col_mapa, col_controles = st.columns([3, 1.3])
-    with col_controles:
+    # --- 3. PANEL SUPERIOR ---
+    col_mapa, col_panel = st.columns([3, 1.3])
+    with col_panel:
         st.title("🛡️ Panel AMZL")
         authenticator.logout('Cerrar Sesión', 'sidebar')
-        modo = st.radio("Capa Principal", ["Coordenadas", "Polígonos CP", "Mapa de Calor"])
         
-        archivo_excel = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
+        buf_p = io.BytesIO()
+        with pd.ExcelWriter(buf_p, engine='openpyxl') as writer:
+            pd.DataFrame(columns=['LAT', 'LON', 'VOL', 'RAD', 'CP', 'NOMBRE', 'RESPONSABLE', 'FECHA']).to_excel(writer, index=False)
+        st.download_button("📥 Plantilla Excel", data=buf_p.getvalue(), file_name="plantilla_amzl.xlsx", use_container_width=True)
+
+        modo = st.radio("Capa Principal", ["Coordenadas", "Polígonos CP"])
+        archivo_excel = st.file_uploader("📂 Cargar Datos", type=["xlsx"])
+        
         if archivo_excel and st.button("🔄 Procesar"):
             xl = pd.ExcelFile(archivo_excel)
             st.session_state.dict_datos = {p: normalizar_df(xl.parse(p), modo) for p in xl.sheet_names}
-            st.rerun()
+            st.session_state.fec_slider_idx = 0; st.rerun()
 
         if st.session_state.dict_datos:
-            periodos = list(st.session_state.dict_datos.keys())
-            fecha_sel = st.select_slider("🕒 Historial:", options=periodos)
+            fecha_sel = st.select_slider("🕒 Periodo:", options=list(st.session_state.dict_datos.keys()))
             df_act = st.session_state.dict_datos[fecha_sel]
             
-            st.markdown("---")
-            modo_analisis = st.toggle("🔍 Análisis de Intersección Total", value=False, help="Ignora rangos para buscar traslapes en toda la base.")
-            
-            stats = df_act.groupby('RANGO_ID')['VOL'].agg(['count', 'sum'])
+            if 'FEC' in df_act.columns and not df_act['FEC'].dropna().empty:
+                if st.toggle("🕒 Modo Línea de Tiempo"):
+                    lista_fec = sorted(df_act['FEC'].dropna().unique())
+                    c_p1, c_p2 = st.columns(2)
+                    if c_p1.button("▶️/⏹️ Play"): st.session_state.reproduciendo = not st.session_state.reproduciendo
+                    f_idx = st.session_state.fec_slider_idx
+                    fec_actual = c_p2.select_slider("Fecha", options=lista_fec, value=lista_fec[f_idx], format_func=lambda x: x.strftime('%d/%m'))
+                    if st.session_state.reproduciendo and f_idx < len(lista_fec)-1:
+                        st.session_state.fec_slider_idx += 1; time.sleep(0.3); st.rerun()
+                    else: st.session_state.reproduciendo = False
+                    df_act = df_act[df_act['FEC'] <= fec_actual]
+
+            modo_analisis = st.toggle("🔍 Análisis Total", value=False)
+            labels = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
             activos = []
             f1, f2 = st.columns(2)
-            lbls = ["⚪ R0", "🟡 R1", "🟠 R2", "🔴 R3", "🏮 R4", "🍷 R5"]
-            for i in range(6):
-                n = int(stats.loc[i, 'count']) if i in stats.index else 0
-                if (f1 if i < 3 else f2).checkbox(f"{lbls[i]} ({n})", value=True, key=f"r_{i}"): activos.append(i)
-            
-            ver_nombres = st.toggle("🏷️ Ver Nombres Fijos", value=True)
+            for i, l in enumerate(labels):
+                if (f1 if i < 3 else f2).checkbox(l, value=True, key=f"r_{i}_{fecha_sel}"): activos.append(i)
+            ver_nombres = st.toggle("🏷️ Ver Nombres", value=True)
+            archivo_sel = st.selectbox("GeoJSON", sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])) if "Polígonos" in modo else None
 
-    # --- 4. RENDERIZADO MAPA ---
+    # --- 4. MAPA ---
     with col_mapa:
         if st.session_state.dict_datos:
-            df_m = df_act[df_act['RANGO_ID'].isin(activos)].copy()
-            m = folium.Map(location=st.session_state.map_center, zoom_start=12, tiles="CartoDB Voyager")
-            COLORS = {0:"#FFFFFF", 1:"#FFFF00", 2:"#FF9900", 3:"#FF4444", 4:"#FF0000", 5:"#660000"}
+            df_m = df_act[(df_act['LAT'] != 0) & (df_act['LON'] != 0)].copy()
+            center = [df_m['LAT'].mean(), df_m['LON'].mean()] if not df_m.empty else [19.4, -99.1]
+            m = folium.Map(location=center, zoom_start=12, tiles="CartoDB Voyager")
+            
+            if not df_m.empty:
+                COLORS = {0:"#FFF", 1:"#FF0", 2:"#F90", 3:"#F44", 4:"#F00", 5:"#600"}
+                df_vis = df_m[df_m['RANGO_ID'].isin(activos)]
+                
+                if "Polígonos" in modo and archivo_sel:
+                    gdf, col_geo = cargar_capa_estado(archivo_sel)
+                    if gdf is not None:
+                        merged = gdf.merge(df_vis, left_on=col_geo, right_on='CP')
+                        for _, f in merged.iterrows():
+                            folium.GeoJson(f['geometry'], style_function=lambda x, c=COLORS.get(f['RANGO_ID'],"#888"): {'fillColor':c, 'color':'#444', 'fillOpacity':0.5, 'weight':1}).add_to(m)
+                else:
+                    for _, f in df_vis.drop_duplicates('COORD_KEY').iterrows():
+                        c = COLORS.get(f['RANGO_ID'], "#888")
+                        folium.Circle([f['LAT'], f['LON']], radius=f['RAD'], color=c, fill=True, fill_opacity=0.3, tooltip=f"<b>{f['NOM']}</b><br>Vol: {f['VOL']}").add_to(m)
+                        if ver_nombres:
+                            folium.Marker([f['LAT'], f['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:black; text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff; width:150px;">{f["PER"]}</div>')).add_to(m)
+                
+                # Protección contra RangeError
+                if df_vis['LAT'].nunique() > 1:
+                    m.fit_bounds([[df_vis['LAT'].min(), df_vis['LON'].min()], [df_vis['LAT'].max(), df_vis['LON'].max()]])
 
-            if "Calor" in modo:
-                HeatMap([[f['LAT'], f['LON'], f['VOL']] for _, f in df_m.dropna(subset=['LAT', 'LON']).iterrows()], radius=50).add_to(m)
-            else:
-                df_visual = df_m.drop_duplicates('COORD_KEY')
-                for _, f in df_visual.dropna(subset=['LAT', 'LON']).iterrows():
-                    c = COLORS.get(f['RANGO_ID'], "#888")
-                    folium.Circle(location=[f['LAT'], f['LON']], radius=f['RAD'], color=c, fill=True, fill_opacity=0.3, tooltip=f['NOM']).add_to(m)
-                    if ver_nombres:
-                        folium.Marker([f['LAT'], f['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; text-shadow: 2px 2px 3px #FFF;">{f["PER"]}</div>')).add_to(m)
+            map_out = st_folium(m, width="100%", height=450, key=f"m_{fecha_sel}_{modo}")
+            st.download_button("💾 Guardar Mapa HTML", data=m._repr_html_().encode('utf-8'), file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
 
-            if not df_m.empty: m.fit_bounds([[df_m['LAT'].min(), df_m['LON'].min()], [df_m['LAT'].max(), df_m['LON'].max()]])
-            map_output = st_folium(m, width="100%", height=500, key=f"map_{fecha_sel}")
-
-            if map_output.get('last_object_clicked'):
-                lat_c, lon_c = map_output['last_object_clicked']['lat'], map_output['last_object_clicked']['lng']
-                df_act['dist_tmp'] = ((df_act['LAT'] - lat_c)**2 + (df_act['LON'] - lon_c)**2)**0.5
-                st.session_state.zona_seleccionada = df_act.nsmallest(1, 'dist_tmp')['COORD_KEY'].iloc[0]
+            if map_out.get('last_object_clicked'):
+                lc = map_out['last_object_clicked']
+                df_act['d_t'] = ((df_act['LAT']-lc['lat'])**2 + (df_act['LON']-lc['lng'])**2)**0.5
+                st.session_state.zona_seleccionada = df_act.nsmallest(1, 'd_t')['COORD_KEY'].iloc[0]
                 st.rerun()
 
-            # --- 5. INFORME DE TRASLAPES ---
-            st.markdown("---")
-            df_base = df_act if modo_analisis else df_m
-            
-            if st.session_state.zona_seleccionada:
-                m_row = df_act[df_act['COORD_KEY'] == st.session_state.zona_seleccionada].iloc[0]
-                df_calc = df_base.copy()
-                df_calc['dist_m'] = (((df_calc['LAT'] - m_row['LAT'])**2 + (df_calc['LON'] - m_row['LON'])**2)**0.5) * 111139
+    # --- 5. INFORME ---
+    if st.session_state.dict_datos:
+        st.markdown("---")
+        df_base = df_act if modo_analisis else df_act[df_act['RANGO_ID'].isin(activos)]
+        
+        if st.session_state.zona_seleccionada:
+            sel_punto = df_act[df_act['COORD_KEY'] == st.session_state.zona_seleccionada]
+            if not sel_punto.empty:
+                m_r = sel_punto.iloc[0]
+                df_c = df_base.copy()
+                df_c['dist_m'] = (((df_c['LAT'] - m_r['LAT'])**2 + (df_c['LON'] - m_r['LON'])**2)**0.5) * 111139
+                df_c['%_ENCIMADO'] = df_c.apply(lambda r: (area_interseccion(m_r['RAD'], r['RAD'], r['dist_m']) / (np.pi * min(m_r['RAD'], r['RAD'])**2)) * 100, axis=1)
+                df_rep = df_c[df_c['%_ENCIMADO'] >= 30].sort_values('%_ENCIMADO', ascending=False)
                 
-                def get_pct(row):
-                    a_int = area_interseccion(m_row['RAD'], row['RAD'], row['dist_m'])
-                    return (a_int / (np.pi * min(m_row['RAD'], row['RAD'])**2)) * 100
-
-                df_calc['%_ENCIMADO'] = df_calc.apply(get_pct, axis=1)
-                df_reporte = df_calc[df_calc['%_ENCIMADO'] >= 30].sort_values('%_ENCIMADO', ascending=False)
-
-                if not df_reporte.empty:
-                    dups = df_reporte[df_reporte['%_ENCIMADO'] >= 99.9]
-                    if len(dups) > 1: st.error(f"🚨 **DUPLICIDAD DETECTADA:** {len(dups)} círculos al 100%.")
-                    
-                    c1, c2 = st.columns([1, 2])
-                    c1.bar_chart(df_reporte.groupby('PER')['VOL'].sum())
-                    if c1.button("🗑️ Limpiar"): 
+                st.subheader(f"📊 Análisis de Empalmes: {m_r['NOM']}")
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.bar_chart(df_rep.groupby('PER')['VOL'].sum())
+                    if st.button("🗑️ Limpiar Selección"): 
                         st.session_state.zona_seleccionada = None; st.rerun()
-                    
-                    def estilo(v):
-                        if v >= 99.9: return 'background-color: #721c24; color: white'
-                        if v >= 80: return 'background-color: #ff4b4b'
-                        return 'background-color: #f1c40f'
-
-                    c2.dataframe(df_reporte[['NOM', 'PER', 'VOL', '%_ENCIMADO']].style.applymap(estilo, subset=['%_ENCIMADO']).format({'%_ENCIMADO': '{:.1f}%'}), use_container_width=True)
-            else:
-                st.info("👆 Selecciona un punto para analizar intersecciones.")
+                with c2:
+                    def est(v): return 'background-color: #721c24; color: white' if v >= 99 else ('background-color: #ff4b4b' if v >= 80 else ('background-color: #ffa500' if v >= 50 else 'background-color: #f1c40f'))
+                    cols = ['NOM', 'PER', 'VOL', '%_ENCIMADO']
+                    if 'FEC' in df_rep.columns: cols.insert(2, 'FEC')
+                    st.dataframe(df_rep[cols].style.applymap(est, subset=['%_ENCIMADO']).format({'%_ENCIMADO': '{:.1f}%'}), use_container_width=True)
+        
+        elif 'lista_fec' in locals() and st.session_state.fec_slider_idx == len(lista_fec)-1:
+            st.success(f"📈 Resumen Temporal: {int(df_act['VOL'].sum())} Vol | {df_act['PER'].nunique()} Responsables")
+            st.line_chart(df_act.groupby('FEC')['VOL'].sum())
 
 elif auth_status is False: st.error('Credenciales incorrectas')
 elif auth_status is None: st.warning('Ingrese credenciales')
