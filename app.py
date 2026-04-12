@@ -21,6 +21,7 @@ if 'dict_datos' not in st.session_state: st.session_state.dict_datos = {}
 if 'zona_seleccionada' not in st.session_state: st.session_state.zona_seleccionada = None
 
 def area_interseccion(r1, r2, d):
+    """Cálculo de área compartida (m2) entre dos círculos."""
     if d >= r1 + r2: return 0.0
     if d <= abs(r1 - r2): return np.pi * min(r1, r2)**2
     p1 = r1**2 * np.arccos((d**2 + r1**2 - r2**2) / (2 * d * r1))
@@ -44,7 +45,7 @@ try:
         config = yaml.load(file, Loader=SafeLoader)
     authenticator = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
     name, auth_status, username = authenticator.login(location='main')
-except: st.error("Error de configuración de seguridad."); st.stop()
+except: st.error("Error en config.yaml"); st.stop()
 
 if auth_status:
     def normalizar_df(df, modo_ref):
@@ -58,7 +59,7 @@ if auth_status:
         if 'NOM' not in df.columns: df['NOM'] = df['CP']
         if 'PER' not in df.columns: df['PER'] = "N/A"
         
-        # --- RANGOS SEGÚN TU LÓGICA ---
+        # Rangos según modo (Polígonos vs Coordenadas)
         lim = [100, 200, 300, 400] if "Polígonos" in modo_ref else [15, 20, 30, 40]
         df['RANGO_ID'] = df['VOL'].apply(lambda v: next((i for i, l in enumerate(lim, 1) if v <= l), 5) if v > 0 else 0)
         df['COORD_KEY'] = df['LAT'].round(4).astype(str) + "," + df['LON'].round(4).astype(str)
@@ -70,10 +71,11 @@ if auth_status:
         st.title("🛡️ Panel AMZL")
         authenticator.logout('Cerrar Sesión', 'sidebar')
         
+        # Generar plantilla con openpyxl
         buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             pd.DataFrame(columns=['LAT', 'LON', 'VOL', 'RAD', 'CP', 'NOMBRE', 'RESPONSABLE']).to_excel(writer, index=False)
-        st.download_button("📥 Descargar Plantilla", data=buffer.getvalue(), file_name="plantilla_amzl.xlsx")
+        st.download_button("📥 Descargar Plantilla Excel", data=buffer.getvalue(), file_name="plantilla_amzl.xlsx")
 
         modo = st.radio("Capa Principal", ["Coordenadas", "Polígonos CP", "Mapa de Calor"])
         archivo_excel = st.file_uploader("📂 Cargar Datos", type=["xlsx"])
@@ -88,19 +90,16 @@ if auth_status:
             df_act = st.session_state.dict_datos[fecha_sel]
             modo_analisis = st.toggle("🔍 Análisis Intersección Total", value=False)
             
-            # --- ETIQUETAS PERSONALIZADAS ---
-            if "Polígonos" in modo:
-                labels = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"]
-            else:
-                labels = ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
+            # Etiquetas personalizadas solicitadas
+            labels = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
             
             activos = []
             f1, f2 = st.columns(2)
             for i in range(6):
-                if (f1 if i < 3 else f2).checkbox(labels[i], value=True, key=f"r_{i}"): activos.append(i)
+                if (f1 if i < 3 else f2).checkbox(labels[i], value=True, key=f"r_{i}_{fecha_sel}"): activos.append(i)
             
             ver_nombres = st.toggle("🏷️ Ver Nombres", value=True)
-            archivo_sel = st.selectbox("GeoJSON", sorted([f for f in os.listdir('mapas') if f.endswith(('.json', '.geojson'))])) if "Polígonos" in modo else None
+            archivo_sel = st.selectbox("GeoJSON Base", sorted([f for f in os.listdir('mapas') if f.endswith(('.json', '.geojson'))])) if "Polígonos" in modo else None
 
     # --- 4. MAPA ---
     with col_mapa:
@@ -117,12 +116,11 @@ if auth_status:
                     merged = gdf.merge(df_m, left_on=col_geo, right_on='CP')
                     for _, f in merged.iterrows():
                         c = COLORS.get(f['RANGO_ID'], "#888")
-                        folium.GeoJson(f['geometry'], style_function=lambda x, col=c: {'fillColor':col, 'color':'#444', 'fillOpacity':0.5, 'weight':1},
-                                       tooltip=f"CP: {f['CP']} | Vol: {f['VOL']}").add_to(m)
+                        folium.GeoJson(f['geometry'], style_function=lambda x, col=c: {'fillColor':col, 'color':'#444', 'fillOpacity':0.5, 'weight':1}, tooltip=f"CP: {f['CP']}").add_to(m)
             else:
                 for _, f in df_m.drop_duplicates('COORD_KEY').iterrows():
                     c = COLORS.get(f['RANGO_ID'], "#888")
-                    folium.Circle([f['LAT'], f['LON']], radius=f['RAD'], color=c, fill=True, fill_opacity=0.3, tooltip=f['NOM']).add_to(m)
+                    folium.Circle([f['LAT'], f['LON']], radius=f['RAD'], color=c, fill=True, fill_opacity=0.3).add_to(m)
                     if ver_nombres:
                         folium.Marker([f['LAT'], f['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; width:120px;">{f["PER"]}</div>')).add_to(m)
 
@@ -149,8 +147,8 @@ if auth_status:
                     c1.bar_chart(df_rep.groupby('PER')['VOL'].sum())
                     def est(v): return 'background-color: #721c24; color: white' if v >= 99 else ('background-color: #ff4b4b' if v >= 80 else ('background-color: #ffa500' if v >= 50 else 'background-color: #f1c40f'))
                     c2.dataframe(df_rep[['NOM', 'PER', 'VOL', '%_ENCIMADO']].style.applymap(est, subset=['%_ENCIMADO']).format({'%_ENCIMADO': '{:.1f}%'}), use_container_width=True, hide_index=True)
-                    if st.button("🗑️ Limpiar"): st.session_state.zona_seleccionada = None; st.rerun()
-            else: st.info("👆 Selecciona un punto para ver traslapes.")
+                    if st.button("🗑️ Limpiar Selección"): st.session_state.zona_seleccionada = None; st.rerun()
+            else: st.info("👆 Selecciona un punto para analizar traslapes.")
 
-elif auth_status is False: st.error('Credenciales incorrectas')
+elif auth_status is False: st.error('Usuario/Contraseña incorrectos')
 elif auth_status is None: st.warning('Ingrese credenciales')
