@@ -1,15 +1,23 @@
 #-*- coding: utf-8 -*-
 # Copyright 2026 Silvia Guadalupe Garcia Espinosa
 
+#-*- coding: utf-8 -*-
+# Copyright 2026 Silvia Guadalupe Garcia Espinosa
+
 import streamlit as st
 import pandas as pd
 import folium
 from folium.plugins import HeatMap
 import geopandas as gpd
-import os, io, yaml, np, time
+import os
+import io
+import yaml
+import time
+import numpy as np
 from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
 from streamlit_folium import st_folium
+
 
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="Sistema Pro AMZL", layout="wide")
