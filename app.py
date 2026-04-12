@@ -131,13 +131,16 @@ if auth_status:
             modo_analisis = st.toggle("🔍 Tabla de Análisis", value=False)
             archivo_geojson = st.selectbox("🗺️ GeoJSON", sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])) if "Polígonos" in modo else None
 
-    # --- 3. MAPA ---
+        # --- 3. MAPA Y DESCARGAS ---
     with col_mapa:
         if st.session_state.dict_datos:
             df_vis = df_act[df_act['RANGO_ID'].isin(activos)]
+            
+            # Determinamos centro para estabilidad visual
             m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             COLORS = {0:"#FFFFFF", 1:"#FFFF00", 2:"#FFA500", 3:"#FF0000", 4:"#FF4500", 5:"#800000"}
 
+            # CAPA: POLÍGONOS CP
             if "Polígonos" in modo and archivo_geojson:
                 gdf, col_cp_geo = cargar_capa_geojson(archivo_geojson)
                 if gdf is not None:
@@ -146,14 +149,23 @@ if auth_status:
                         match = df_vis[df_vis['CP'] == cp_val]
                         if not match.empty:
                             v = match.iloc[0]['VOL']
-                            folium.GeoJson(row['geometry'], style_function=lambda x, r=obtener_rango_id(v,True): {'fillColor': COLORS.get(r, "#888"), 'color': 'black', 'weight': 1, 'fillOpacity': 0.5},
-                                           tooltip=f"Zona: {match.iloc[0]['NOM']} | Vol: {int(v)}").add_to(m)
+                            folium.GeoJson(
+                                row['geometry'], 
+                                style_function=lambda x, r=obtener_rango_id(v, True): {
+                                    'fillColor': COLORS.get(r, "#888"), 'color': 'black', 'weight': 1, 'fillOpacity': 0.5
+                                },
+                                tooltip=f"Zona: {match.iloc[0]['NOM']} | Vol: {int(v)}"
+                            ).add_to(m)
 
+            # CAPA: CÍRCULOS (COORDENADAS Y TIEMPO)
             df_coords = df_vis[(df_vis['LAT'] != 0) & (df_vis['LON'] != 0)]
             dict_reporte = []
+            
             if not df_coords.empty:
+                # Centrado automático dinámico
                 m.fit_bounds([df_coords[['LAT', 'LON']].min().values.tolist(), df_coords[['LAT', 'LON']].max().values.tolist()])
                 pts = df_coords.to_dict('records')
+                
                 for i, p1 in enumerate(pts):
                     area_p1 = np.pi * (p1['RAD']**2)
                     choques, total_p = [], 0
@@ -164,21 +176,33 @@ if auth_status:
                             a = area_interseccion(p1['RAD'], p2['RAD'], d)
                             if a > 0:
                                 pi = round((a / area_p1) * 100, 1)
-                                choques.append(f"{p2['NOM']} ({pi}%)"); total_p += pi
+                                choques.append(f"{p2['NOM']} ({pi}%)")
+                                total_p += pi
                     
-                    folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=COLORS.get(p1['RANGO_ID'], "#888"), fill=True, fill_opacity=0.35, 
-                                   tooltip=f"Zona: {p1['NOM']} | Vol: {int(p1['VOL'])}").add_to(m)
+                    folium.Circle(
+                        [p1['LAT'], p1['LON']], radius=p1['RAD'], 
+                        color=COLORS.get(p1['RANGO_ID'], "#888"), 
+                        fill=True, fill_opacity=0.35, 
+                        tooltip=f"Zona: {p1['NOM']} | Vol: {int(p1['VOL'])}"
+                    ).add_to(m)
+                    
                     if ver_nombres:
-                        folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:black; text-shadow: 0px 0px 3px white; width:150px; pointer-events:none;">{p1["NOM"]}</div>')).add_to(m)
-                    dict_reporte.append({"Estatus": "🔴" if total_p > 50 else "🟡" if total_p > 15 else "🟢", "Zona": p1['NOM'], "% Traslape Total": f"{round(min(100, total_p), 1)}%", "Empalmado con": ", ".join(choques) if choques else "Sin traslape"})
+                        folium.Marker(
+                            [p1['LAT'], p1['LON']], 
+                            icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:black; text-shadow: 0px 0px 3px white; width:150px; pointer-events:none;">{p1["NOM"]}</div>')
+                        ).add_to(m)
+                    
+                    dict_reporte.append({
+                        "Estatus": "🔴" if total_p > 50 else "🟡" if total_p > 15 else "🟢", 
+                        "Zona": p1['NOM'], 
+                        "% Traslape Total": f"{round(min(100, total_p), 1)}%", 
+                        "Empalmado con": ", ".join(choques) if choques else "Sin traslape"
+                    })
 
-            # KEY DINÁMICO PARA ANIMACIÓN
-            m_key = f"map_{st.session_state.fec_slider_idx}" if st.session_state.reproduciendo else "map_fixed"
-# Usar un KEY fijo elimina el parpadeo porque el navegador no destruye el mapa
-            st_folium(m, width="100%", height=550, key="mapa_fijo_amzl")
+            # RENDERIZADO: Key fijo para evitar que la pantalla se apague al cambiar de fecha
+            st_folium(m, width="100%", height=550, key="mapa_operativo_fijo")
 
-            
-            # DESCARGAS
+            # SECCIÓN: DESCARGAS
             c_d1, c_d2 = st.columns(2)
             with c_d1:
                 map_io = io.BytesIO()
@@ -189,18 +213,18 @@ if auth_status:
                     buf_r = io.BytesIO()
                     pd.DataFrame(dict_reporte).to_excel(buf_r, index=False)
                     st.download_button("📊 Informe Excel", data=buf_r.getvalue(), file_name="analisis.xlsx", use_container_width=True)
-            if modo_analisis and dict_reporte: st.table(pd.DataFrame(dict_reporte))
+            
+            if modo_analisis and dict_reporte:
+                st.table(pd.DataFrame(dict_reporte))
 
-  # 2. Cambia la lógica de reproducción por esta (Añadimos un validador de estado):
-if st.session_state.reproduciendo:
-    f_v = sorted(st.session_state.dict_datos[fecha_sel]['FEC'].dropna().unique())
-    if st.session_state.fec_slider_idx < len(f_v) - 1:
-        st.session_state.fec_slider_idx += 1
-        # IMPORTANTE: Un tiempo muy corto (menos de 0.5) causa parpadeo 
-        # porque el navegador no termina de dibujar cuando ya le pides otro.
-        time.sleep(1.0 / vel) 
-        st.rerun()
-    else:
-        st.session_state.reproduciendo = False
-        st.rerun()
-
+    # --- 4. LÓGICA DE REPRODUCCIÓN (AL FINAL) ---
+    if st.session_state.reproduciendo:
+        f_v = sorted(st.session_state.dict_datos[fecha_sel]['FEC'].dropna().unique())
+        if st.session_state.fec_slider_idx < len(f_v) - 1:
+            st.session_state.fec_slider_idx += 1
+            # Tiempo de espera (1.0 recomendado para evitar parpadeo de redibujado)
+            time.sleep(1.0 / vel) 
+            st.rerun()
+        else:
+            st.session_state.reproduciendo = False
+            st.rerun()
