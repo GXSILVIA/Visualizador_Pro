@@ -1,9 +1,6 @@
 #-*- coding: utf-8 -*-
 # Copyright 2026 Silvia Guadalupe Garcia Espinosa
 
-#-*- coding: utf-8 -*-
-# Copyright 2026 Silvia Guadalupe Garcia Espinosa
-
 import streamlit as st
 import pandas as pd
 import folium
@@ -17,7 +14,6 @@ import numpy as np
 from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
 from streamlit_folium import st_folium
-
 
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="Sistema Pro AMZL", layout="wide")
@@ -59,18 +55,27 @@ if auth_status:
         mapa = {'LAT':['LAT','LATITUD'],'LON':['LON','LONGITUD'],'VOL':['VOL','VOLUMEN'],'RAD':['RADIO','RAD'],'CP':['CP','C.P.'],'NOM':['NOMBRE','ZONA'],'PER':['PERSONA','RESPONSABLE'], 'FEC':['FECHA','DATE']}
         rename_dict = {c: k for k, v in mapa.items() for c in df.columns if c in v}
         df = df.rename(columns=rename_dict)
-        for c in ['LAT', 'LON', 'VOL']: df[c] = pd.to_numeric(df.get(c, 0), errors='coerce').fillna(0)
+        
+        for c in ['LAT', 'LON', 'VOL']:
+            df[c] = pd.to_numeric(df.get(c, 0), errors='coerce').fillna(0)
         df['RAD'] = pd.to_numeric(df.get('RAD', 750), errors='coerce').fillna(750)
+        
+        # --- SOLUCIÓN ERROR CP ---
+        if 'CP' in df.columns:
+            df['CP'] = df['CP'].astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(5)
+        else:
+            df['CP'] = '00000'
+            
         if 'FEC' in df.columns: df['FEC'] = pd.to_datetime(df['FEC'], errors='coerce')
-        df['CP'] = df.get('CP', '0').astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(5)
         if 'NOM' not in df.columns: df['NOM'] = df['CP']
         if 'PER' not in df.columns: df['PER'] = "N/A"
+        
         lim = [100, 200, 300, 400] if "Polígonos" in modo_ref else [15, 20, 30, 40]
         df['RANGO_ID'] = df['VOL'].apply(lambda v: next((i for i, l in enumerate(lim, 1) if v <= l), 5) if v > 0 else 0)
         df['COORD_KEY'] = df['LAT'].round(4).astype(str) + "," + df['LON'].round(4).astype(str)
         return df
 
-    # --- 3. UI SUPERIOR ---
+    # --- 3. PANEL SUPERIOR ---
     col_mapa, col_panel = st.columns([3, 1.3])
     with col_panel:
         st.title("🛡️ Panel AMZL")
@@ -102,7 +107,10 @@ if auth_status:
                     df_act = df_act[df_act['FEC'] <= fec_actual]
             modo_analisis = st.toggle("🔍 Análisis Total", value=False)
             lbls = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
-            activos = [i for i, l in enumerate(lbls) if st.sidebar.checkbox(l, value=True, key=f"c_{i}")] if False else [0,1,2,3,4,5]
+            activos = []
+            c1, c2 = st.columns(2)
+            for i, l in enumerate(lbls):
+                if (c1 if i < 3 else c2).checkbox(l, value=True, key=f"c_{i}"): activos.append(i)
             ver_nombres = st.toggle("🏷️ Nombres", value=True)
             archivo_sel = st.selectbox("GeoJSON", sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])) if "Polígonos" in modo else None
 
@@ -117,31 +125,32 @@ if auth_status:
                 if "Polígonos" in modo and archivo_sel:
                     gdf, col_geo = cargar_capa_estado(archivo_sel)
                     if gdf is not None:
-                        merged = gdf.merge(df_m, left_on=col_geo, right_on='CP')
+                        merged = gdf.merge(df_m[df_m['RANGO_ID'].isin(activos)], left_on=col_geo, right_on='CP')
                         for _, f in merged.iterrows():
                             folium.GeoJson(f['geometry'], style_function=lambda x, c=COLORS.get(f['RANGO_ID'],"#888"): {'fillColor':c, 'color':'#444', 'fillOpacity':0.5, 'weight':1}).add_to(m)
                 else:
-                    for _, f in df_m.drop_duplicates('COORD_KEY').iterrows():
+                    for _, f in df_m[df_m['RANGO_ID'].isin(activos)].drop_duplicates('COORD_KEY').iterrows():
                         c = COLORS.get(f['RANGO_ID'], "#888")
                         folium.Circle([f['LAT'], f['LON']], radius=f['RAD'], color=c, fill=True, fill_opacity=0.3, tooltip=f"Vol: {f['VOL']}").add_to(m)
                         if ver_nombres:
                             folium.Marker([f['LAT'], f['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:black; text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff; width:150px;">{f["PER"]}</div>')).add_to(m)
-                # PROTECCIÓN FIT_BOUNDS: Solo si hay área real (puntos distintos)
-                if df_m['LAT'].nunique() > 1 and df_m['LON'].nunique() > 1:
+                if df_m['LAT'].nunique() > 1:
                     m.fit_bounds([[df_m['LAT'].min(), df_m['LON'].min()], [df_m['LAT'].max(), df_m['LON'].max()]])
             map_out = st_folium(m, width="100%", height=450, key=f"m_{fecha_sel}")
+            st.download_button("💾 Guardar Mapa HTML", data=m._repr_html_().encode('utf-8'), file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
             if map_out.get('last_object_clicked'):
                 lc = map_out['last_object_clicked']
                 df_act['d_t'] = ((df_act['LAT']-lc['lat'])**2 + (df_act['LON']-lc['lng'])**2)**0.5
                 st.session_state.zona_seleccionada = df_act.nsmallest(1, 'd_t')['COORD_KEY'].iloc[0]; st.rerun()
 
-    # --- 5. INFORME (PEGADO ABAJO) ---
+    # --- 5. INFORME ---
     if st.session_state.dict_datos:
+        st.markdown("---")
         if st.session_state.zona_seleccionada:
             sel = df_act[df_act['COORD_KEY'] == st.session_state.zona_seleccionada]
             if not sel.empty:
                 m_r = sel.iloc[0]
-                df_c = (df_act if modo_analisis else df_m).copy()
+                df_c = (df_act if modo_analisis else df_act[df_act['RANGO_ID'].isin(activos)]).copy()
                 df_c['dist_m'] = (((df_c['LAT'] - m_r['LAT'])**2 + (df_c['LON'] - m_r['LON'])**2)**0.5) * 111139
                 df_c['%_ENCIMADO'] = df_c.apply(lambda r: (area_interseccion(m_r['RAD'], r['RAD'], r['dist_m']) / (np.pi * min(m_r['RAD'], r['RAD'])**2)) * 100, axis=1)
                 df_rep = df_c[df_c['%_ENCIMADO'] >= 30].sort_values('%_ENCIMADO', ascending=False)
@@ -152,7 +161,6 @@ if auth_status:
                     if st.button("🗑️ Limpiar"): st.session_state.zona_seleccionada = None; st.rerun()
                 with r2:
                     def est(v): return 'background-color: #721c24; color: white' if v >= 99 else ('background-color: #ff4b4b' if v >= 80 else ('background-color: #ffa500' if v >= 50 else 'background-color: #f1c40f'))
-                    # Añadida columna FECHA al reporte
                     cols_rep = ['NOM', 'PER', 'VOL', '%_ENCIMADO']
                     if 'FEC' in df_rep.columns: cols_rep.insert(2, 'FEC')
                     st.dataframe(df_rep[cols_rep].style.applymap(est, subset=['%_ENCIMADO']).format({'%_ENCIMADO': '{:.1f}%'}), use_container_width=True)
