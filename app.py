@@ -17,7 +17,6 @@ from streamlit_folium import st_folium
 # --- 1. CONFIGURACIÓN INICIAL ---
 st.set_page_config(page_title="Sistema Pro AMZL", layout="wide")
 
-# Estados persistentes para el Modo Play
 if 'dict_datos' not in st.session_state: st.session_state.dict_datos = {}
 if 'reproduciendo' not in st.session_state: st.session_state.reproduciendo = False
 if 'fec_slider_idx' not in st.session_state: st.session_state.fec_slider_idx = 0
@@ -49,7 +48,7 @@ def cargar_capa_geojson(archivo):
 
 def normalizar_df(df, modo_ref):
     if len(df) > 2000:
-        st.warning("⚠️ Limitado a 2,000 filas por estabilidad.")
+        st.warning("⚠️ Limitado a 2,000 filas.")
         df = df.head(2000)
     df.columns = df.columns.str.strip().str.upper()
     mapa_cols = {'LAT':['LAT','LATITUD'],'LON':['LON','LONGITUD'],'VOL':['VOL','VOLUMEN'],'RAD':['RADIO','RAD'],'CP':['CP','C.P.'],'NOM':['NOMBRE','ZONA'], 'FEC':['FECHA','DATE']}
@@ -101,14 +100,15 @@ if auth_status:
             fecha_sel = st.select_slider("🕒 Pestaña:", options=lista_p) if len(lista_p) > 1 else lista_p[0]
             df_act = st.session_state.dict_datos[fecha_sel].copy()
             
-            # --- LÓGICA DE TIEMPO CON PLAY ---
+            # --- LÓGICA DE TIEMPO (REPRODUCCIÓN FLUIDA) ---
             if modo == "Línea de Tiempo" and 'FEC' in df_act.columns:
                 f_v = sorted(df_act['FEC'].dropna().unique())
                 if len(f_v) > 1:
+                    st.write("### 🎬 Control de Tiempo")
                     c1, c2, c3 = st.columns([1,1,2])
                     if c1.button("▶️ Play"): st.session_state.reproduciendo = True
                     if c2.button("⏸️ Stop"): st.session_state.reproduciendo = False
-                    velocidad = c3.select_slider("Vel:", options=[0.5, 1.0, 2.0], value=1.0, label_visibility="collapsed")
+                    vel = c3.select_slider("Vel:", options=[0.5, 1.0, 2.0, 4.0], value=2.0)
                     
                     st.session_state.fec_slider_idx = st.select_slider("Historial:", options=range(len(f_v)), 
                                                                       format_func=lambda x: f_v[x].strftime('%Y-%m-%d'),
@@ -118,7 +118,7 @@ if auth_status:
                     if st.session_state.reproduciendo:
                         if st.session_state.fec_slider_idx < len(f_v) - 1:
                             st.session_state.fec_slider_idx += 1
-                            time.sleep(1/velocidad)
+                            time.sleep(1/vel)
                             st.rerun()
                         else: st.session_state.reproduciendo = False
                 elif len(f_v) == 1: st.info(f"Fecha: {f_v[0].date()}")
@@ -156,7 +156,7 @@ if auth_status:
             df_coords = df_vis[(df_vis['LAT'] != 0) & (df_vis['LON'] != 0)]
             dict_reporte = []
             if not df_coords.empty:
-                # CENTRADO AUTOMÁTICO
+                # AUTO-CENTRADADO DINÁMICO
                 m.fit_bounds([df_coords[['LAT', 'LON']].min().values.tolist(), df_coords[['LAT', 'LON']].max().values.tolist()])
                 pts = df_coords.to_dict('records')
                 for i, p1 in enumerate(pts):
@@ -170,12 +170,15 @@ if auth_status:
                             if a > 0:
                                 pi = round((a / area_p1) * 100, 1)
                                 choques.append(f"{p2['NOM']} ({pi}%)"); total_p += pi
-                    folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=COLORS.get(p1['RANGO_ID'], "#888"), fill=True, fill_opacity=0.35, tooltip=f"Zona: {p1['NOM']} | Vol: {int(p1['VOL'])}").add_to(m)
+                    
+                    folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=COLORS.get(p1['RANGO_ID'], "#888"), fill=True, fill_opacity=0.35, 
+                                   tooltip=f"Zona: {p1['NOM']} | Vol: {int(p1['VOL'])}").add_to(m)
                     if ver_nombres:
                         folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:black; text-shadow: 0px 0px 3px white; width:150px; pointer-events:none;">{p1["NOM"]}</div>')).add_to(m)
                     dict_reporte.append({"Estatus": "🔴" if total_p > 50 else "🟡" if total_p > 15 else "🟢", "Zona": p1['NOM'], "% Traslape Total": f"{round(min(100, total_p), 1)}%", "Empalmado con": ", ".join(choques) if choques else "Sin traslape"})
 
-            st_folium(m, width="100%", height=550, key=f"map_{fecha_sel}_{st.session_state.fec_slider_idx}")
+            # KEY ESTÁTICO: Clave para eliminar el parpadeo durante el Play
+            st_folium(m, width="100%", height=550, key="mapa_operativo_amzl")
             
             # --- 4. DESCARGAS ---
             c_d1, c_d2 = st.columns(2)
