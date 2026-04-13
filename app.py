@@ -43,8 +43,10 @@ def cargar_capa_geojson(archivo):
         gdf = gpd.read_file(ruta).to_crs("EPSG:4326")
         gdf['geometry'] = gdf['geometry'].simplify(0.002)
         col_cp = next((c for c in ['d_cp', 'CP', 'CODIGOPOSTAL'] if c in gdf.columns), gdf.columns[0])
-        return gdf, col_cp
-    return None, None
+        # Buscamos columna de estado
+        col_edo = next((c for c in ['NOM_ENT', 'ESTADO', 'ENTIDAD', 'd_estado'] if c in gdf.columns), None)
+        return gdf, col_cp, col_edo
+    return None, None, None
 
 def normalizar_df(df, modo_ref):
     if len(df) > 2000:
@@ -97,6 +99,7 @@ if auth_status:
             st.rerun()
 
         # CONTROLES SIEMPRE VISIBLES
+        gdf_filtrado, col_cp_geo, limites_estado = None, None, None
         if st.session_state.dict_datos:
             lista_p = list(st.session_state.dict_datos.keys())
             fecha_sel = st.select_slider("🕒 Pestaña:", options=lista_p) if len(lista_p) > 1 else lista_p[0]
@@ -129,43 +132,56 @@ if auth_status:
 
             ver_nombres = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             modo_analisis = st.toggle("🔍 Tabla de Análisis", value=False)
+            
+            # NUEVO FILTRO DE ESTADO PARA POLÍGONOS
             archivo_geojson = st.selectbox("🗺️ GeoJSON", sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])) if "Polígonos" in modo else None
+            if "Polígonos" in modo and archivo_geojson:
+                gdf_completo, col_cp_geo, col_edo_geo = cargar_capa_geojson(archivo_geojson)
+                if gdf_completo is not None:
+                    if col_edo_geo:
+                        lista_edos = sorted(gdf_completo[col_edo_geo].unique().tolist())
+                        edo_sel = st.selectbox("📍 Filtrar por Estado:", ["Todos"] + lista_edos)
+                        if edo_sel != "Todos":
+                            gdf_filtrado = gdf_completo[gdf_completo[col_edo_geo] == edo_sel]
+                            b = gdf_filtrado.total_bounds
+                            limites_estado = [[b[1], b[0]], [b[3], b[2]]] # [miny, minx], [maxy, maxx]
+                        else:
+                            gdf_filtrado = gdf_completo
+                    else:
+                        gdf_filtrado = gdf_completo
 
-        # --- 3. MAPA Y DESCARGAS ---
+    # --- 3. MAPA Y DESCARGAS ---
     with col_mapa:
         if st.session_state.dict_datos:
             df_vis = df_act[df_act['RANGO_ID'].isin(activos)]
-            
-            # Determinamos centro para estabilidad visual
             m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             COLORS = {0:"#FFFFFF", 1:"#FFFF00", 2:"#FFA500", 3:"#FF0000", 4:"#FF4500", 5:"#800000"}
 
-            # CAPA: POLÍGONOS CP
-            if "Polígonos" in modo and archivo_geojson:
-                gdf, col_cp_geo = cargar_capa_geojson(archivo_geojson)
-                if gdf is not None:
-                    for _, row in gdf.iterrows():
-                        cp_val = str(row[col_cp_geo]).zfill(5)
-                        match = df_vis[df_vis['CP'] == cp_val]
-                        if not match.empty:
-                            v = match.iloc[0]['VOL']
-                            folium.GeoJson(
-                                row['geometry'], 
-                                style_function=lambda x, r=obtener_rango_id(v, True): {
-                                    'fillColor': COLORS.get(r, "#888"), 'color': 'black', 'weight': 1, 'fillOpacity': 0.5
-                                },
-                                tooltip=f"Zona: {match.iloc[0]['NOM']} | Vol: {int(v)}"
-                            ).add_to(m)
+            # CAPA: POLÍGONOS CP (CON FILTRO DE ESTADO Y AUTO-ZOOM)
+            if "Polígonos" in modo and gdf_filtrado is not None:
+                if limites_estado: m.fit_bounds(limites_estado)
+                for _, row in gdf_filtrado.iterrows():
+                    cp_val = str(row[col_cp_geo]).zfill(5)
+                    match = df_vis[df_vis['CP'] == cp_val]
+                    if not match.empty:
+                        v = match.iloc[0]['VOL']
+                        folium.GeoJson(
+                            row['geometry'], 
+                            style_function=lambda x, r=obtener_rango_id(v, True): {
+                                'fillColor': COLORS.get(r, "#888"), 'color': 'black', 'weight': 1, 'fillOpacity': 0.5
+                            },
+                            tooltip=f"Zona: {match.iloc[0]['NOM']} | Vol: {int(v)}"
+                        ).add_to(m)
 
             # CAPA: CÍRCULOS (COORDENADAS Y TIEMPO)
             df_coords = df_vis[(df_vis['LAT'] != 0) & (df_vis['LON'] != 0)]
             dict_reporte = []
             
             if not df_coords.empty:
-                # Centrado automático dinámico
-                m.fit_bounds([df_coords[['LAT', 'LON']].min().values.tolist(), df_coords[['LAT', 'LON']].max().values.tolist()])
-                pts = df_coords.to_dict('records')
+                if "Polígonos" not in modo: # Solo auto-zoom si no estamos en modo polígonos filtrados
+                    m.fit_bounds([df_coords[['LAT', 'LON']].min().values.tolist(), df_coords[['LAT', 'LON']].max().values.tolist()])
                 
+                pts = df_coords.to_dict('records')
                 for i, p1 in enumerate(pts):
                     area_p1 = np.pi * (p1['RAD']**2)
                     choques, total_p = [], 0
@@ -199,7 +215,6 @@ if auth_status:
                         "Empalmado con": ", ".join(choques) if choques else "Sin traslape"
                     })
 
-            # RENDERIZADO: Key fijo para evitar que la pantalla se apague al cambiar de fecha
             st_folium(m, width="100%", height=550, key="mapa_operativo_fijo")
 
             # SECCIÓN: DESCARGAS
@@ -217,12 +232,11 @@ if auth_status:
             if modo_analisis and dict_reporte:
                 st.table(pd.DataFrame(dict_reporte))
 
-    # --- 4. LÓGICA DE REPRODUCCIÓN (AL FINAL) ---
+    # --- 4. LÓGICA DE REPRODUCCIÓN ---
     if st.session_state.reproduciendo:
         f_v = sorted(st.session_state.dict_datos[fecha_sel]['FEC'].dropna().unique())
         if st.session_state.fec_slider_idx < len(f_v) - 1:
             st.session_state.fec_slider_idx += 1
-            # Tiempo de espera (1.0 recomendado para evitar parpadeo de redibujado)
             time.sleep(1.0 / vel) 
             st.rerun()
         else:
