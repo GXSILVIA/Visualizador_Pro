@@ -156,21 +156,33 @@ if auth_status:
             m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             COLORS = {0:"#FFFFFF", 1:"#FFFF00", 2:"#FFA500", 3:"#FF0000", 4:"#FF4500", 5:"#800000"}
 
-            # CAPA: POLÍGONOS CP
+                       # --- CAPA: POLÍGONOS CP (VERSIÓN CORREGIDA) ---
             if "Polígonos" in modo and gdf_filtrado is not None:
                 if limites_estado: m.fit_bounds(limites_estado)
+                
+                # Pre-limpieza del Excel para asegurar coincidencia
+                df_vis['CP_MATCH'] = df_vis['CP'].astype(str).str.strip().str.zfill(5)
+                
                 for _, row in gdf_filtrado.iterrows():
-                    cp_val = str(row[col_cp_geo]).zfill(5)
-                    match = df_vis[df_vis['CP'] == cp_val] if 'CP' in df_vis.columns else pd.DataFrame()
+                    # Limpiamos el CP del GeoJSON también
+                    cp_geo = str(row[col_cp_geo]).strip().zfill(5)
+                    
+                    # Buscamos en el DataFrame de Excel
+                    match = df_vis[df_vis['CP_MATCH'] == cp_geo]
+                    
                     if not match.empty:
                         v = match.iloc[0]['VOL']
                         folium.GeoJson(
                             row['geometry'], 
                             style_function=lambda x, r=obtener_rango_id(v, True): {
-                                'fillColor': COLORS.get(r, "#888"), 'color': 'black', 'weight': 1, 'fillOpacity': 0.5
+                                'fillColor': COLORS.get(r, "#888"), 
+                                'color': 'black', 
+                                'weight': 1.5, 
+                                'fillOpacity': 0.7 # Subimos opacidad para que se vea claro
                             },
-                            tooltip=f"Zona: {match.iloc[0]['NOM']} | Vol: {int(v)}"
+                            tooltip=f"Zona: {match.iloc[0]['NOM']} | CP: {cp_geo} | Vol: {int(v)}"
                         ).add_to(m)
+
 
             # CAPA: CÍRCULOS (COORDENADAS Y TIEMPO) - PROTEGIDA CONTRA KEYERROR
             dict_reporte = []
