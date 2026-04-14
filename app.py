@@ -46,7 +46,7 @@ def obtener_rango_id(v, modo_p):
 def cargar_geo(archivo):
     ruta = f"mapas/{archivo}"
     if os.path.exists(ruta):
-        gdf = gpd.read_file(ruta).to_crs("EPSG:4326")
+        gdf = gpd.read_file(ruta, engine="pyogrio").to_crs("EPSG:4326")
         gdf['geometry'] = gdf['geometry'].simplify(0.001)
         col = next((c for c in ['d_cp','CP','CODIGOPOSTAL','cp','id'] if c in gdf.columns), gdf.columns[0])
         return gdf, col
