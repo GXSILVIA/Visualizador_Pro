@@ -41,11 +41,11 @@ def cargar_capa_geojson(archivo):
     ruta = f"mapas/{archivo}"
     if os.path.exists(ruta):
         gdf = gpd.read_file(ruta).to_crs("EPSG:4326")
-        gdf['geometry'] = gdf['geometry'].simplify(0.002)
-        col_cp = next((c for c in ['d_cp', 'CP', 'CODIGOPOSTAL'] if c in gdf.columns), gdf.columns[0])
-        col_edo = next((c for c in ['NOM_ENT', 'ESTADO', 'ENTIDAD', 'd_estado'] if c in gdf.columns), None)
-        return gdf, col_cp, col_edo
-    return None, None, None
+        gdf['geometry'] = gdf['geometry'].simplify(0.001)
+        # Búsqueda flexible de la columna de CP en el GeoJSON
+        col_cp = next((c for c in ['d_cp', 'CP', 'CODIGOPOSTAL', 'cp', 'id', 'postal_code'] if c in gdf.columns), gdf.columns[0])
+        return gdf, col_cp
+    return None, None
 
 def normalizar_df(df, modo_ref):
     if len(df) > 2000:
@@ -56,10 +56,8 @@ def normalizar_df(df, modo_ref):
     rename_dict = {c: k for k, v in mapa_cols.items() for c in df.columns if c in v}
     df = df.rename(columns=rename_dict)
     
-    # Conversión segura por columnas existentes
     for c in ['LAT', 'LON', 'VOL', 'RAD']:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+        if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
     
     if 'RAD' not in df.columns or (df['RAD'] == 0).all(): df['RAD'] = 750
     if 'FEC' in df.columns: df['FEC'] = pd.to_datetime(df['FEC'], errors='coerce')
@@ -85,22 +83,19 @@ if auth_status:
         authenticator.logout('Cerrar Sesión', 'sidebar')
         modo = st.radio("Capa Principal", ["Coordenadas", "Polígonos CP", "Línea de Tiempo"])
         
-        # --- FILTRO DE ESTADO (ANTES DE PROCESAR) ---
+        # --- FILTRO DE ESTADO (OPTIMIZADO PARA ARCHIVOS SEPARADOS) ---
         gdf_filtrado, col_cp_geo, limites_estado = None, None, None
         if "Polígonos" in modo:
-            archivos_geo = sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])
-            archivo_geojson = st.selectbox("🗺️ Seleccionar GeoJSON", archivos_geo)
-            if archivo_geojson:
-                gdf_completo, col_cp_geo, col_edo_geo = cargar_capa_geojson(archivo_geojson)
-                if gdf_completo is not None and col_edo_geo:
-                    lista_edos = sorted(gdf_completo[col_edo_geo].unique().tolist())
-                    edo_sel = st.selectbox("📍 Estado a Procesar:", ["Todos"] + lista_edos)
-                    if edo_sel != "Todos":
-                        gdf_filtrado = gdf_completo[gdf_completo[col_edo_geo] == edo_sel]
-                        b = gdf_filtrado.total_bounds # [minx, miny, maxx, maxy]
-                        limites_estado = [[b[1], b[0]], [b[3], b[2]]]
-                    else:
-                        gdf_filtrado = gdf_completo
+            archivos_disponibles = sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])
+            nombres_edos = [f.replace('.geojson', '').replace('_', ' ') for f in archivos_disponibles]
+            
+            estado_sel = st.selectbox("📍 Seleccionar Estado:", nombres_edos)
+            if estado_sel:
+                archivo_real = archivos_disponibles[nombres_edos.index(estado_sel)]
+                gdf_filtrado, col_cp_geo = cargar_capa_geojson(archivo_real)
+                if gdf_filtrado is not None:
+                    b = gdf_filtrado.total_bounds
+                    limites_estado = [[b[1], b[0]], [b[3], b[2]]] # [miny, minx], [maxy, maxx]
 
         st.subheader("📥 Plantillas")
         cols_p = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"],
@@ -123,7 +118,7 @@ if auth_status:
             fecha_sel = st.select_slider("🕒 Pestaña:", options=lista_p) if len(lista_p) > 1 else lista_p[0]
             df_act = st.session_state.dict_datos[fecha_sel].copy()
             
-            # --- CONTROL DE TIEMPO (PLAY) ---
+            # MODO CINE (LÍNEA DE TIEMPO)
             vel = 1.0
             if modo == "Línea de Tiempo" and 'FEC' in df_act.columns:
                 f_v = sorted(df_act['FEC'].dropna().unique())
@@ -140,59 +135,49 @@ if auth_status:
 
             st.write("---")
             labels = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
-            activos = []
-            cols_r = st.columns(3)
-            for i, lab in enumerate(labels):
-                with cols_r[i % 3]:
-                    if st.checkbox(lab, value=True, key=f"r_{i}_{fecha_sel}"): activos.append(i)
-
+            activos = [i for i, lab in enumerate(labels) if st.checkbox(lab, value=True, key=f"r_{i}_{fecha_sel}")]
             ver_nombres = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             modo_analisis = st.toggle("🔍 Tabla de Análisis", value=False)
 
-    # --- 3. MAPA Y DESCARGAS ---
+    # --- 3. MAPA Y RENDERIZADO ---
     with col_mapa:
         if st.session_state.dict_datos:
-            df_vis = df_act[df_act['RANGO_ID'].isin(activos)]
+            df_vis = df_act[df_act['RANGO_ID'].isin(activos)].copy()
             m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             COLORS = {0:"#FFFFFF", 1:"#FFFF00", 2:"#FFA500", 3:"#FF0000", 4:"#FF4500", 5:"#800000"}
 
-                       # --- CAPA: POLÍGONOS CP (VERSIÓN CORREGIDA) ---
+            # CAPA POLÍGONOS (Solo busca en el estado seleccionado)
             if "Polígonos" in modo and gdf_filtrado is not None:
                 if limites_estado: m.fit_bounds(limites_estado)
                 
-                # Pre-limpieza del Excel para asegurar coincidencia
-                df_vis['CP_MATCH'] = df_vis['CP'].astype(str).str.strip().str.zfill(5)
-                
+                # Unión optimizada por Diccionario
+                df_vis['CP_KEY'] = df_vis['CP'].astype(str).str.strip().str.zfill(5)
+                dict_vol = pd.Series(df_vis.VOL.values, index=df_vis.CP_KEY).to_dict()
+                dict_nom = pd.Series(df_vis.NOM.values, index=df_vis.CP_KEY).to_dict()
+
                 for _, row in gdf_filtrado.iterrows():
-                    # Limpiamos el CP del GeoJSON también
                     cp_geo = str(row[col_cp_geo]).strip().zfill(5)
-                    
-                    # Buscamos en el DataFrame de Excel
-                    match = df_vis[df_vis['CP_MATCH'] == cp_geo]
-                    
-                    if not match.empty:
-                        v = match.iloc[0]['VOL']
+                    if cp_geo in dict_vol:
+                        v = dict_vol[cp_geo]
                         folium.GeoJson(
-                            row['geometry'], 
+                            row['geometry'],
                             style_function=lambda x, r=obtener_rango_id(v, True): {
-                                'fillColor': COLORS.get(r, "#888"), 
-                                'color': 'black', 
-                                'weight': 1.5, 
-                                'fillOpacity': 0.7 # Subimos opacidad para que se vea claro
+                                'fillColor': COLORS.get(r, "#888"), 'color': 'black', 'weight': 1, 'fillOpacity': 0.6
                             },
-                            tooltip=f"Zona: {match.iloc[0]['NOM']} | CP: {cp_geo} | Vol: {int(v)}"
+                            tooltip=f"Zona: {dict_nom[cp_geo]} | CP: {cp_geo} | Vol: {int(v)}"
                         ).add_to(m)
 
-
-            # CAPA: CÍRCULOS (COORDENADAS Y TIEMPO) - PROTEGIDA CONTRA KEYERROR
+            # CAPA CÍRCULOS (COORDENADAS / TIEMPO)
             dict_reporte = []
             if 'LAT' in df_vis.columns and 'LON' in df_vis.columns:
                 df_coords = df_vis[(df_vis['LAT'] != 0) & (df_vis['LON'] != 0)]
                 if not df_coords.empty:
                     if "Polígonos" not in modo:
-                        m.fit_bounds([df_coords[['LAT', 'LON']].min().values.tolist(), df_coords[['LAT', 'LON']].max().values.tolist()])
+                        m.fit_bounds([df_coords[['LAT', 'LON']].min().tolist(), df_coords[['LAT', 'LON']].max().tolist()])
+                    
                     pts = df_coords.to_dict('records')
                     for i, p1 in enumerate(pts):
+                        # Lógica de traslape (sin cambios para mantener compatibilidad)
                         area_p1 = np.pi * (p1['RAD']**2)
                         choques, total_p = [], 0
                         for j, p2 in enumerate(pts):
@@ -204,26 +189,28 @@ if auth_status:
                                     pi = round((a / area_p1) * 100, 1)
                                     choques.append(f"{p2['NOM']} ({pi}%)")
                                     total_p += pi
-                        folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=COLORS.get(p1['RANGO_ID'], "#888"), fill=True, fill_opacity=0.35, tooltip=f"Zona: {p1['NOM']} | Vol: {int(p1['VOL'])}").add_to(m)
+                        
+                        folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=COLORS.get(p1['RANGO_ID'], "#888"), fill=True, fill_opacity=0.35).add_to(m)
                         if ver_nombres:
-                            folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:black; text-shadow: 0px 0px 3px white; width:150px; pointer-events:none;">{p1["NOM"]}</div>')).add_to(m)
-                        dict_reporte.append({"Estatus": "🔴" if total_p > 50 else "🟡" if total_p > 15 else "🟢", "Zona": p1['NOM'], "% Traslape Total": f"{round(min(100, total_p), 1)}%", "Empalmado con": ", ".join(choques) if choques else "Sin traslape"})
+                            folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:black; text-shadow: 0px 0px 3px white;">{p1["NOM"]}</div>')).add_to(m)
+                        dict_reporte.append({"Estatus": "🔴" if total_p > 50 else "🟡" if total_p > 15 else "🟢", "Zona": p1['NOM'], "% Traslape": f"{round(min(100, total_p), 1)}%", "Empalmes": ", ".join(choques)})
 
-            st_folium(m, width="100%", height=550, key="mapa_operativo_fijo")
+            st_folium(m, width="100%", height=580, key="mapa_fijo")
 
-            # DESCARGAS
-            c_d1, c_d2 = st.columns(2)
-            with c_d1:
+            # SECCIÓN DESCARGAS
+            c1, c2 = st.columns(2)
+            with c1:
                 map_io = io.BytesIO(); m.save(map_io, close_file=False)
-                st.download_button("🗺️ Mapa HTML", data=map_io.getvalue(), file_name="mapa_amzl.html", use_container_width=True)
-            with c_d2:
+                st.download_button("🗺️ Descargar Mapa HTML", data=map_io.getvalue(), file_name="mapa_amzl.html", use_container_width=True)
+            with c2:
                 if dict_reporte:
                     buf_r = io.BytesIO(); pd.DataFrame(dict_reporte).to_excel(buf_r, index=False)
-                    st.download_button("📊 Informe Excel", data=buf_r.getvalue(), file_name="analisis.xlsx", use_container_width=True)
+                    st.download_button("📊 Descargar Informe Excel", data=buf_r.getvalue(), file_name="analisis_traslape.xlsx", use_container_width=True)
+            
             if modo_analisis and dict_reporte:
                 st.table(pd.DataFrame(dict_reporte))
 
-    # --- 4. LÓGICA DE REPRODUCCIÓN ---
+    # --- 4. LÓGICA DE REPRODUCCIÓN (PARA MODO CINE) ---
     if st.session_state.reproduciendo:
         f_v = sorted(st.session_state.dict_datos[fecha_sel]['FEC'].dropna().unique())
         if st.session_state.fec_slider_idx < len(f_v) - 1:
