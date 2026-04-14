@@ -1,3 +1,4 @@
+
 #-*- coding: utf-8 -*-
 # Copyright 2026 Silvia Guadalupe Garcia Espinosa
 
@@ -42,7 +43,6 @@ def cargar_capa_geojson(archivo):
     if os.path.exists(ruta):
         gdf = gpd.read_file(ruta).to_crs("EPSG:4326")
         gdf['geometry'] = gdf['geometry'].simplify(0.001)
-        # Búsqueda flexible de la columna de CP en el GeoJSON
         col_cp = next((c for c in ['d_cp', 'CP', 'CODIGOPOSTAL', 'cp', 'id', 'postal_code'] if c in gdf.columns), gdf.columns[0])
         return gdf, col_cp
     return None, None
@@ -83,19 +83,18 @@ if auth_status:
         authenticator.logout('Cerrar Sesión', 'sidebar')
         modo = st.radio("Capa Principal", ["Coordenadas", "Polígonos CP", "Línea de Tiempo"])
         
-        # --- FILTRO DE ESTADO (OPTIMIZADO PARA ARCHIVOS SEPARADOS) ---
+        # --- FILTRO DE ESTADO ---
         gdf_filtrado, col_cp_geo, limites_estado = None, None, None
         if "Polígonos" in modo:
-            archivos_disponibles = sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])
-            nombres_edos = [f.replace('.geojson', '').replace('_', ' ') for f in archivos_disponibles]
-            
+            archivos_geo = sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])
+            nombres_edos = [f.replace('.geojson', '').replace('_', ' ') for f in archivos_geo]
             estado_sel = st.selectbox("📍 Seleccionar Estado:", nombres_edos)
             if estado_sel:
-                archivo_real = archivos_disponibles[nombres_edos.index(estado_sel)]
+                archivo_real = archivos_geo[nombres_edos.index(estado_sel)]
                 gdf_filtrado, col_cp_geo = cargar_capa_geojson(archivo_real)
                 if gdf_filtrado is not None:
                     b = gdf_filtrado.total_bounds
-                    limites_estado = [[b[1], b[0]], [b[3], b[2]]] # [miny, minx], [maxy, maxx]
+                    limites_estado = [[b[1], b[0]], [b[3], b[2]]]
 
         st.subheader("📥 Plantillas")
         cols_p = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"],
@@ -118,7 +117,7 @@ if auth_status:
             fecha_sel = st.select_slider("🕒 Pestaña:", options=lista_p) if len(lista_p) > 1 else lista_p[0]
             df_act = st.session_state.dict_datos[fecha_sel].copy()
             
-            # MODO CINE (LÍNEA DE TIEMPO)
+            # --- MODO CINE ---
             vel = 1.0
             if modo == "Línea de Tiempo" and 'FEC' in df_act.columns:
                 f_v = sorted(df_act['FEC'].dropna().unique())
@@ -127,30 +126,34 @@ if auth_status:
                     c1, c2, c3 = st.columns(3)
                     if c1.button("▶️ Play"): st.session_state.reproduciendo = True
                     if c2.button("⏸️ Stop"): st.session_state.reproduciendo = False
-                    vel = c3.select_slider("Vel:", options=[0.5, 1.0, 2.0, 4.0], value=1.0, label_visibility="collapsed")
+                    vel = c3.select_slider("Vel:", options=[0.5, 1.0, 2.0, 4.0], value=1.0)
                     st.session_state.fec_slider_idx = st.select_slider("Periodo:", options=range(len(f_v)), 
                                                                       format_func=lambda x: f_v[x].strftime('%Y-%m-%d'),
                                                                       value=st.session_state.fec_slider_idx)
                     df_act = df_act[df_act['FEC'] <= f_v[st.session_state.fec_slider_idx]]
 
             st.write("---")
+            # --- RANGOS 3x3 ---
             labels = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
-            activos = [i for i, lab in enumerate(labels) if st.checkbox(lab, value=True, key=f"r_{i}_{fecha_sel}")]
+            activos = []
+            cols_r = st.columns(3)
+            for i, lab in enumerate(labels):
+                with cols_r[i % 3]:
+                    if st.checkbox(lab, value=True, key=f"r_{i}_{fecha_sel}"): activos.append(i)
+
             ver_nombres = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             modo_analisis = st.toggle("🔍 Tabla de Análisis", value=False)
 
-    # --- 3. MAPA Y RENDERIZADO ---
+    # --- 3. MAPA ---
     with col_mapa:
         if st.session_state.dict_datos:
             df_vis = df_act[df_act['RANGO_ID'].isin(activos)].copy()
             m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             COLORS = {0:"#FFFFFF", 1:"#FFFF00", 2:"#FFA500", 3:"#FF0000", 4:"#FF4500", 5:"#800000"}
 
-            # CAPA POLÍGONOS (Solo busca en el estado seleccionado)
+            # CAPA POLÍGONOS CON NOMBRES
             if "Polígonos" in modo and gdf_filtrado is not None:
                 if limites_estado: m.fit_bounds(limites_estado)
-                
-                # Unión optimizada por Diccionario
                 df_vis['CP_KEY'] = df_vis['CP'].astype(str).str.strip().str.zfill(5)
                 dict_vol = pd.Series(df_vis.VOL.values, index=df_vis.CP_KEY).to_dict()
                 dict_nom = pd.Series(df_vis.NOM.values, index=df_vis.CP_KEY).to_dict()
@@ -159,25 +162,26 @@ if auth_status:
                     cp_geo = str(row[col_cp_geo]).strip().zfill(5)
                     if cp_geo in dict_vol:
                         v = dict_vol[cp_geo]
-                        folium.GeoJson(
-                            row['geometry'],
+                        folium.GeoJson(row['geometry'],
                             style_function=lambda x, r=obtener_rango_id(v, True): {
                                 'fillColor': COLORS.get(r, "#888"), 'color': 'black', 'weight': 1, 'fillOpacity': 0.6
                             },
                             tooltip=f"Zona: {dict_nom[cp_geo]} | CP: {cp_geo} | Vol: {int(v)}"
                         ).add_to(m)
+                        if ver_nombres:
+                            centroid = row['geometry'].centroid
+                            folium.Marker([centroid.y, centroid.x], 
+                                icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:black; text-align:center; width:80px; text-shadow: 0px 0px 3px white;">{dict_nom[cp_geo]}</div>')
+                            ).add_to(m)
 
-            # CAPA CÍRCULOS (COORDENADAS / TIEMPO)
+            # CAPA CÍRCULOS Y ANÁLISIS MEJORADO
             dict_reporte = []
             if 'LAT' in df_vis.columns and 'LON' in df_vis.columns:
                 df_coords = df_vis[(df_vis['LAT'] != 0) & (df_vis['LON'] != 0)]
                 if not df_coords.empty:
-                    if "Polígonos" not in modo:
-                        m.fit_bounds([df_coords[['LAT', 'LON']].min().tolist(), df_coords[['LAT', 'LON']].max().tolist()])
-                    
+                    if "Polígonos" not in modo: m.fit_bounds([df_coords[['LAT', 'LON']].min().tolist(), df_coords[['LAT', 'LON']].max().tolist()])
                     pts = df_coords.to_dict('records')
                     for i, p1 in enumerate(pts):
-                        # Lógica de traslape (sin cambios para mantener compatibilidad)
                         area_p1 = np.pi * (p1['RAD']**2)
                         choques, total_p = [], 0
                         for j, p2 in enumerate(pts):
@@ -187,34 +191,33 @@ if auth_status:
                                 a = area_interseccion(p1['RAD'], p2['RAD'], d)
                                 if a > 0:
                                     pi = round((a / area_p1) * 100, 1)
+                                    # Corrección lógica: si d > 0, el traslape no puede ser 100% real
+                                    if d > 10 and pi >= 100: pi = 99.5
                                     choques.append(f"{p2['NOM']} ({pi}%)")
                                     total_p += pi
                         
                         folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=COLORS.get(p1['RANGO_ID'], "#888"), fill=True, fill_opacity=0.35).add_to(m)
                         if ver_nombres:
-                            folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:black; text-shadow: 0px 0px 3px white;">{p1["NOM"]}</div>')).add_to(m)
-                        dict_reporte.append({"Estatus": "🔴" if total_p > 50 else "🟡" if total_p > 15 else "🟢", "Zona": p1['NOM'], "% Traslape": f"{round(min(100, total_p), 1)}%", "Empalmes": ", ".join(choques)})
+                            folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:black; text-shadow: 0px 0px 3px white; width:150px;">{p1["NOM"]}</div>')).add_to(m)
+                        dict_reporte.append({"Estatus": "🔴" if total_p > 50 else "🟡" if total_p > 15 else "🟢", "Zona": p1['NOM'], "% Traslape Total": f"{round(min(100, total_p), 1)}%", "Detalle": ", ".join(choques)})
 
-            st_folium(m, width="100%", height=580, key="mapa_fijo")
+            st_folium(m, width="100%", height=550, key="mapa_fijo")
 
-            # SECCIÓN DESCARGAS
-            c1, c2 = st.columns(2)
-            with c1:
+            # --- DESCARGAS ---
+            c_d1, c_d2 = st.columns(2)
+            with c_d1:
                 map_io = io.BytesIO(); m.save(map_io, close_file=False)
-                st.download_button("🗺️ Descargar Mapa HTML", data=map_io.getvalue(), file_name="mapa_amzl.html", use_container_width=True)
-            with c2:
+                st.download_button("🗺️ Mapa HTML", data=map_io.getvalue(), file_name="mapa_amzl.html", use_container_width=True)
+            with c_d2:
                 if dict_reporte:
                     buf_r = io.BytesIO(); pd.DataFrame(dict_reporte).to_excel(buf_r, index=False)
-                    st.download_button("📊 Descargar Informe Excel", data=buf_r.getvalue(), file_name="analisis_traslape.xlsx", use_container_width=True)
-            
-            if modo_analisis and dict_reporte:
-                st.table(pd.DataFrame(dict_reporte))
+                    st.download_button("📊 Informe Excel", data=buf_r.getvalue(), file_name="analisis.xlsx", use_container_width=True)
+            if modo_analisis and dict_reporte: st.table(pd.DataFrame(dict_reporte))
 
-    # --- 4. LÓGICA DE REPRODUCCIÓN (PARA MODO CINE) ---
+    # --- LÓGICA DE TIEMPO ---
     if st.session_state.reproduciendo:
         f_v = sorted(st.session_state.dict_datos[fecha_sel]['FEC'].dropna().unique())
         if st.session_state.fec_slider_idx < len(f_v) - 1:
             st.session_state.fec_slider_idx += 1
             time.sleep(1.0 / vel); st.rerun()
-        else:
-            st.session_state.reproduciendo = False; st.rerun()
+        else: st.session_state.reproduciendo = False; st.rerun()
