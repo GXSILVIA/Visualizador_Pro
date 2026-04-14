@@ -1,4 +1,3 @@
-
 #-*- coding: utf-8 -*-
 # Copyright 2026 Silvia Guadalupe Garcia Espinosa
 
@@ -42,7 +41,8 @@ def calcular_traslape_real(p1, otros_pts):
     return (np.sum(cubiertos) / n) * 100
 
 def obtener_rango_id(v, modo_p):
-    lim = if modo_p else
+    # CORRECCIÓN DE SYNTAX ERROR
+    lim = [100, 200, 300, 400] if modo_p else [15, 20, 30, 40]
     return next((i for i, l in enumerate(lim, 1) if v <= l), 5) if v > 0 else 0
 
 @st.cache_data
@@ -51,7 +51,7 @@ def cargar_geo(archivo):
     if os.path.exists(ruta):
         gdf = gpd.read_file(ruta).to_crs("EPSG:4326")
         gdf['geometry'] = gdf['geometry'].simplify(0.001)
-        col = next((c for c in ['d_cp','CP','CODIGOPOSTAL','cp','id'] if c in gdf.columns), gdf.columns)
+        col = next((c for c in ['d_cp','CP','CODIGOPOSTAL','cp','id'] if c in gdf.columns), gdf.columns[0])
         return gdf, col
     return None, None
 
@@ -90,7 +90,7 @@ if status:
                 gdf, col_cp_g = cargar_geo(archivo_real)
                 if gdf is not None: 
                     b = gdf.total_bounds
-                    bounds = [[b, b], [b, b]]
+                    bounds = [[b[1], b[0]], [b[3], b[2]]]
 
         st.subheader("📥 Plantillas")
         cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"], "Polígonos CP": ["ZONA", "CP", "VOLUMEN"], "Mapa de Calor": ["CLIENTE", "LATITUD", "LONGITUD", "FECHA"]}
@@ -105,23 +105,21 @@ if status:
 
         if st.session_state.dict_datos:
             pestanas = list(st.session_state.dict_datos.keys())
-            sel = pestanas if len(pestanas) == 1 else st.select_slider("🕒 Pestaña:", options=pestanas)
+            sel = pestanas[0] if len(pestanas) == 1 else st.select_slider("🕒 Pestaña:", options=pestanas)
             df_act = st.session_state.dict_datos[sel].copy()
 
             if modo == "Mapa de Calor":
-                st.write("---")
-                st.info("💡 Capacidad: **35 entregas/día**")
+                st.info("💡 Capacidad fija: **35 entregas/día**")
                 if 'FEC' in df_act.columns:
                     dias = sorted(df_act['FEC'].dt.day_name().unique())
                     dia_sel = st.multiselect("Filtrar días:", dias, default=dias)
                     df_act = df_act[df_act['FEC'].dt.day_name().isin(dia_sel)]
             else:
-                st.write("---")
                 df_act['R_ID'] = df_act['VOL'].apply(lambda x: obtener_rango_id(x, modo == "Polígonos CP"))
                 labs = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if modo == "Polígonos CP" else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
                 cols = st.columns(3)
                 acts = [i for i, l in enumerate(labs) if cols[i%3].checkbox(l, value=True, key=f"r{i}{sel}")]
-                ver_n, m_ana = st.toggle("🏷️ Nombres", value=True), st.toggle("🔍 Análisis", value=False)
+                ver_n, m_ana = st.toggle("🏷️ Ver Nombres Fijos", value=True), st.toggle("🔍 Tabla de Análisis", value=False)
 
     with col_m:
         if st.session_state.dict_datos:
@@ -132,7 +130,7 @@ if status:
                 dh = dh[dh['LAT'] != 0]
                 if not dh.empty:
                     HeatMap(dh.values.tolist(), radius=15, blur=15, min_opacity=0.4).add_to(m)
-                    # CENTRADO DINÁMICO SEGÚN EL ARCHIVO
+                    # Centrado dinámico basado en los datos del archivo
                     m.fit_bounds([[dh.LAT.min(), dh.LON.min()], [dh.LAT.max(), dh.LON.max()]])
             else:
                 df_v = df_act[df_act['R_ID'].isin(acts)].copy()
