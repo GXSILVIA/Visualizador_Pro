@@ -65,10 +65,21 @@ if status:
         auth.logout('Cerrar Sesión', 'sidebar')
         modo = st.radio("Capa", ["Coordenadas", "Polígonos CP"])
         
-        # --- PLANTILLAS BASE RESTAURADAS ---
+        gdf, col_cp_g, bounds_geo = None, None, None
+        
+        # --- RESTAURACIÓN SELECTOR ESTADO ---
+        if "Polígonos" in modo:
+            archs = sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])
+            if archs:
+                edo_sel = st.selectbox("📍 Estado:", [f.replace('.geojson','').replace('_',' ') for f in archs])
+                idx = [f.replace('.geojson','').replace('_',' ') for f in archs].index(edo_sel)
+                gdf = gpd.read_file(f"mapas/{archs[idx]}").to_crs("EPSG:4326")
+                col_cp_g = next((c for c in ['d_cp','CP','CODIGOPOSTAL'] if c in gdf.columns), gdf.columns[0])
+                b = gdf.total_bounds
+                bounds_geo = [[b[1], b[0]], [b[3], b[2]]]
+
         st.subheader("📥 Plantillas")
-        cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"], 
-                     "Polígonos CP": ["ZONA", "CP", "VOLUMEN"]}
+        cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"], "Polígonos CP": ["ZONA", "CP", "VOLUMEN"]}
         buf_base = io.BytesIO()
         pd.DataFrame(columns=cols_base[modo]).to_excel(buf_base, index=False)
         st.download_button(f"Base {modo}", data=buf_base.getvalue(), file_name=f"base_{modo.lower().replace(' ','_')}.xlsx", use_container_width=True)
@@ -95,10 +106,27 @@ if status:
             clrs = {0:"#FFF", 1:"#FF0", 2:"#FFA500", 3:"#F00", 4:"#FF4500", 5:"#800000"}
             rep = []
 
+            # CAPA POLÍGONOS
+            if "Polígonos" in modo and gdf is not None:
+                if bounds_geo: m.fit_bounds(bounds_geo)
+                df_v_cp = df_v.set_index('CP')
+                for _, r in gdf.iterrows():
+                    cp = str(r[col_cp_g]).zfill(5)
+                    if cp in df_v_cp.index:
+                        vol = df_v_cp.loc[cp, 'VOL']
+                        nom = df_v_cp.loc[cp, 'NOM']
+                        folium.GeoJson(r['geometry'], style_function=lambda x, v=vol: {
+                            'fillColor':clrs[obtener_rango_id(v,True)], 'color':'#000', 'weight':1, 'fillOpacity':0.4
+                        }, tooltip=f"<b>{nom}</b><br>Vol: {int(vol)}").add_to(m)
+                        if ver_n:
+                            c = r['geometry'].centroid
+                            folium.Marker([c.y, c.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-align:center; width:80px;">{nom}</div>')).add_to(m)
+
+            # CAPA COORDENADAS
             if 'LAT' in df_v.columns and 'LON' in df_v.columns:
                 df_c = df_v[(df_v['LAT'] != 0) & (df_v['LON'] != 0)]
                 if not df_c.empty:
-                    m.fit_bounds([[df_c['LAT'].min(), df_c['LON'].min()], [df_c['LAT'].max(), df_c['LON'].max()]])
+                    if "Polígonos" not in modo: m.fit_bounds([[df_c['LAT'].min(), df_c['LON'].min()], [df_c['LAT'].max(), df_c['LON'].max()]])
                     pts = df_c.to_dict('records')
                     for i, p1 in enumerate(pts):
                         otros = [p for j, p in enumerate(pts) if i != j]
@@ -109,7 +137,7 @@ if status:
                                 p_int = round((area_interseccion(p1['RAD'], p2['RAD'], dist) / (np.pi * p1['RAD']**2)) * 100, 1)
                                 if p_int > 0: ints.append({"nom": p2['NOM'], "porc": p_int})
                         
-                        tr_total_area = ints[0]['porc'] if len(ints) == 1 else round(calcular_traslape_real(p1, otros), 1)
+                        tr_total_area = ints['porc'] if len(ints) == 1 else round(calcular_traslape_real(p1, otros), 1)
                         det_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in ints]) if ints else "No traslapado"
                         suma_acum = sum([n['porc'] for n in ints])
                         
@@ -117,17 +145,14 @@ if status:
                         pq_perdidos = vol_act * (suma_acum / 100)
                         salud = "🟢 Sano" if 30 <= vol_act <= 45 else "🟡 Desviado" if (20 <= vol_act < 30 or 45 < vol_act <= 55) else "🔴 Crítico"
                         
-                        tip = f"<b>{p1['NOM']}</b><br>Paquetes: {int(vol_act)}<br>Traslape Real: {tr_total_area}%" if m_ana else f"<b>{p1['NOM']}</b><br>Vol: {int(vol_act)}"
+                        tip = f"<b>{p1['NOM']}</b><br>Traslape Real: {tr_total_area}%" if m_ana else f"<b>{p1['NOM']}</b><br>Vol: {int(vol_act)}"
                         folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, tooltip=tip).add_to(m)
                         if ver_n: folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; text-shadow: 0 0 2px #FFF; width:150px;">{p1["NOM"]}</div>')).add_to(m)
                         
                         rep.append({
                             "Salud": salud, "Zona": p1['NOM'], "Paquetes Actual": int(vol_act), 
-                            "Paquetes Perdidos": round(pq_perdidos, 1),
-                            "Potencial Ideal": round(vol_act + pq_perdidos, 1),
-                            "% Traslape Total (Área)": f"{tr_total_area}%",
-                            "% Acumulado": f"{round(suma_acum, 1)}%", 
-                            "Detalle": det_txt
+                            "Paquetes Perdidos": round(pq_perdidos, 1), "Potencial Ideal": round(vol_act + pq_perdidos, 1),
+                            "% Traslape Total (Área)": f"{tr_total_area}%", "% Acumulado": f"{round(suma_acum, 1)}%", "Detalle": det_txt
                         })
 
             mapa_html = m.get_root().render()
@@ -137,8 +162,7 @@ if status:
             with c1: st.download_button("🗺️ Exportar Mapa HTML", data=mapa_html, file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
             with c2:
                 if rep:
-                    buf = io.BytesIO()
-                    with pd.ExcelWriter(buf, engine='xlsxwriter') as wr: pd.DataFrame(rep).to_excel(wr, index=False)
+                    buf = io.BytesIO(); pd.DataFrame(rep).to_excel(buf, index=False)
                     st.download_button("📊 Exportar Excel", data=buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
             
             if m_ana and rep:
