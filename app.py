@@ -176,36 +176,42 @@ if status:
                             "Traslapado con": detalles_txt
                         })
 
-                                               # C. RENDERIZADO Y BOTONES
+            # C. RENDERIZADO Y BOTONES
             st_folium(m, width="100%", height=550, key="mapa_fijo", returned_objects=[])
             
             c1, c2 = st.columns(2)
             
             with c1:
-                # MAPA (Sin doble visualización)
+                # SOLUCIÓN FINAL MAPA DOBLE: Forzamos un HTML limpio sin scripts de Streamlit
                 import io
                 map_buf = io.BytesIO()
-                m.save(map_buf, close_file=False)
+                map_html = m._repr_html_() # Esto obtiene el HTML puro del mapa
                 st.download_button(
                     label="🗺️ Mapa HTML", 
-                    data=map_buf.getvalue(), 
+                    data=map_html, 
                     file_name="mapa_amzl.html", 
                     mime="text/html", 
                     use_container_width=True
                 )
 
             with c2:
-                # EXCEL (Se genera a partir de la tabla 'rep' que ya tienes)
+                # BOTÓN EXCEL: Generado a partir de 'rep'
                 import io
                 excel_buf = io.BytesIO()
-                # Creamos el Excel usando la misma data que muestra tu tabla de abajo
                 with pd.ExcelWriter(excel_buf, engine='xlsxwriter') as writer:
                     pd.DataFrame(rep).to_excel(writer, index=False, sheet_name='Analisis')
                 
                 st.download_button(
                     label="📊 Informe Excel", 
-                    data=excel_buf.getvalue(), # El archivo se entrega aquí
-                    file_name="analisis_datos.xlsx", 
+                    data=excel_buf.getvalue(), 
+                    file_name="analisis.xlsx", 
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
+
+            # ESTO MOSTRARÁ LA TABLA DEBAJO DE LOS BOTONES
+            if rep: 
+                st.write("---")
+                st.subheader("📋 Vista Previa del Informe")
+                st.dataframe(pd.DataFrame(rep), use_container_width=True, hide_index=True)
+                                              
