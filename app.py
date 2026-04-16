@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import folium
 import geopandas as gpd
-import os, io, yaml, numpy as np
+import os, io, yaml, numpy as np, re
 from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
 import streamlit.components.v1 as components
@@ -79,13 +79,21 @@ if status:
         
         if "Polígonos" in modo:
             archs = sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])
-            edo_sel = st.selectbox("📍 Estado:", [f.replace('.geojson','').replace('_',' ') for f in archs])
-            if edo_sel:
+            if archs:
+                edo_sel = st.selectbox("📍 Estado:", [f.replace('.geojson','').replace('_',' ') for f in archs])
                 archivo_real = archs[[f.replace('.geojson','').replace('_',' ') for f in archs].index(edo_sel)]
                 gdf, col_cp_g = cargar_geo(archivo_real)
-                if gdf is not None: 
+                if gdf is not None:
                     b = gdf.total_bounds
                     bounds = [[b[1], b[0]], [b[3], b[2]]]
+
+        # --- BOTONES DE PLANTILLAS BASE ---
+        st.subheader("📥 Plantillas")
+        cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"],
+                     "Polígonos CP": ["ZONA", "CP", "VOLUMEN"]}
+        buf_p = io.BytesIO()
+        pd.DataFrame(columns=cols_base[modo]).to_excel(buf_p, index=False)
+        st.download_button(f"Base {modo}", data=buf_p.getvalue(), file_name=f"base_{modo.lower().replace(' ','_')}.xlsx", use_container_width=True)
 
         xl_file = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
         if xl_file and st.button("🔄 Procesar"):
@@ -102,7 +110,7 @@ if status:
             acts = [i for i, l in enumerate(labs) if cols[i%3].checkbox(l, value=True, key=f"r{i}{sel}")]
             ver_n = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             m_ana = st.toggle("🔍 Tabla de Análisis", value=False)
-            if m_ana: f_estatus = st.multiselect("Filtrar Estatus:", ["🟢", "🟡", "🔴"], default=["🟢", "🟡", "🔴"])
+            if m_ana: f_estatus = st.multiselect("Filtrar Salud:", ["🟢 Sano", "🟡 Desviado", "🔴 Crítico"], default=["🟢 Sano", "🟡 Desviado", "🔴 Crítico"])
 
     # --- 3. LÓGICA DE MAPA ---
     with col_m:
@@ -112,20 +120,25 @@ if status:
             clrs = {0:"#FFF", 1:"#FF0", 2:"#FFA500", 3:"#F00", 4:"#FF4500", 5:"#800000"}
             rep = []
 
+            # CAPA POLÍGONOS CP
             if "Polígonos" in modo and gdf is not None:
                 if bounds: m.fit_bounds(bounds)
-                v_dict = df_v.set_index('CP')['VOL'].to_dict()
-                n_dict = df_v.set_index('CP')['NOM'].to_dict()
+                df_v['K'] = df_v['CP'].astype(str).str.zfill(5)
+                v_dict = df_v.set_index('K')['VOL'].to_dict()
+                n_dict = df_v.set_index('K')['NOM'].to_dict()
                 for _, r in gdf.iterrows():
                     cp = str(r[col_cp_g]).zfill(5)
                     if cp in v_dict:
-                        folium.GeoJson(r['geometry'], style_function=lambda x, v=v_dict[cp]: {
+                        vol = v_dict[cp]
+                        t_pol = f"<b>{n_dict[cp]}</b><br>Vol: {int(vol)}"
+                        folium.GeoJson(r['geometry'], style_function=lambda x, v=vol: {
                             'fillColor':clrs[obtener_rango_id(v,True)], 'color':'#000', 'weight':1, 'fillOpacity':0.4
-                        }, tooltip=f"<b>{n_dict[cp]}</b><br>Vol: {int(v_dict[cp])}").add_to(m)
+                        }, tooltip=t_pol).add_to(m)
                         if ver_n:
                             c = r['geometry'].centroid
                             folium.Marker([c.y, c.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-align:center; width:80px;">{n_dict[cp]}</div>')).add_to(m)
 
+            # CAPA COORDENADAS
             if 'LAT' in df_v.columns and 'LON' in df_v.columns:
                 df_c = df_v[(df_v['LAT'] != 0) & (df_v['LON'] != 0)]
                 if not df_c.empty:
@@ -140,20 +153,21 @@ if status:
                                 p_int = round((area_interseccion(p1['RAD'], p2['RAD'], dist) / (np.pi * p1['RAD']**2)) * 100, 1)
                                 if p_int > 0: ints.append({"nom": p2['NOM'], "porc": p_int})
                         
-                        if len(ints) == 1:
-                            tr_final, det_txt = ints[0]['porc'], f"{ints[0]['nom']} ({ints[0]['porc']}%)"
-                        elif len(ints) > 1:
-                            tr_final, det_txt = round(calcular_traslape_real(p1, otros), 1), ", ".join([f"{n['nom']} ({n['porc']}%)" for n in ints])
-                        else:
-                            tr_final, det_txt = 0.0, "No traslapado"
+                        tr_final = round(calcular_traslape_real(p1, otros), 1) if len(ints) > 1 else (ints[0]['porc'] if ints else 0.0)
+                        det_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in ints]) if ints else "No traslapado"
+                        
+                        vol_act = p1['VOL']
+                        vol_ideal = vol_act / (1 - (tr_final/100)) if tr_final < 100 else vol_act
+                        salud = "🟢 Sano" if 30 <= vol_act <= 45 else "🟡 Desviado" if (20 <= vol_act < 30 or 45 < vol_act <= 55) else "🔴 Crítico"
 
-                        folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, 
-                                     tooltip=f"<b>{p1['NOM']}</b><br>Traslape: {tr_final}%").add_to(m)
-                        if ver_n: 
+                        tooltip_txt = f"<b>{p1['NOM']}</b><br>Salud: {salud}<br>Traslape: {tr_final}%" if m_ana else f"<b>{p1['NOM']}</b><br>Vol: {int(vol_act)}"
+                        folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, tooltip=tooltip_txt).add_to(m)
+                        if ver_n:
                             folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; text-shadow: 0 0 3px #FFF; width:150px;">{p1["NOM"]}</div>')).add_to(m)
-                        rep.append({"Estatus": "🔴" if tr_final > 50 else "🟡" if tr_final > 15 else "🟢", "Zona": p1['NOM'], "% Traslape Real": f"{tr_final}%", "Traslapado con": det_txt})
+                        
+                        suma_acum = sum([float(x) for x in re.findall(r"\((\d+\.?\d*)%\)", det_txt)])
+                        rep.append({"Salud": salud, "Zona": p1['NOM'], "Volumen Actual": int(vol_act), "Volumen Ideal": int(vol_ideal), "% Traslape Real": f"{tr_final}%", "Acumulación Traslapes": f"{round(suma_acum, 1)}%", "Traslapado con": det_txt})
 
-            # SOLUCIÓN DEFINITIVA: Renderizado estático via components para evitar parpadeo y duplicados
             mapa_html = m.get_root().render()
             components.html(mapa_html, height=550)
             
@@ -161,10 +175,11 @@ if status:
             with c1: st.download_button("🗺️ Mapa HTML", data=mapa_html, file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
             with c2:
                 if rep:
-                    buf = io.BytesIO(); pd.DataFrame(rep).to_excel(buf, index=False)
+                    buf = io.BytesIO()
+                    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer: pd.DataFrame(rep).to_excel(writer, index=False, sheet_name='Analisis')
                     st.download_button("📊 Informe Excel", data=buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
             
             if m_ana and rep:
                 st.write("---")
                 df_rep = pd.DataFrame(rep)
-                st.table(df_rep[df_rep['Estatus'].isin(f_estatus)])
+                st.table(df_rep[df_rep['Salud'].isin(f_estatus)])
