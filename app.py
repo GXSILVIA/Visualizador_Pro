@@ -24,7 +24,7 @@ def area_interseccion(r1, r2, d):
 def calcular_traslape_real(p1, otros_pts):
     """Muestreo de 3000 puntos para precisión quirúrgica."""
     if not otros_pts: return 0.0
-    n = 3000 # Ajustado a 3000 puntos
+    n = 3000 
     ang = np.random.uniform(0, 2*np.pi, n)
     rad = np.sqrt(np.random.uniform(0, 1, n)) * p1['RAD']
     m_grado = 111139
@@ -89,8 +89,7 @@ if status:
                     bounds = [[b[1], b[0]], [b[3], b[2]]]
 
         st.subheader("📥 Plantillas")
-        cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"],
-                     "Polígonos CP": ["ZONA", "CP", "VOLUMEN"]}
+        cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"], "Polígonos CP": ["ZONA", "CP", "VOLUMEN"]}
         buf_p = io.BytesIO()
         pd.DataFrame(columns=cols_base[modo]).to_excel(buf_p, index=False)
         st.download_button(f"Base {modo}", data=buf_p.getvalue(), file_name=f"base_{modo.lower().replace(' ','_')}.xlsx", use_container_width=True)
@@ -110,6 +109,8 @@ if status:
             acts = [i for i, l in enumerate(labs) if cols[i%3].checkbox(l, value=True, key=f"r{i}{sel}")]
             ver_n = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             m_ana = st.toggle("🔍 Tabla de Análisis", value=False)
+            if m_ana:
+                filtro_estatus = st.multiselect("Filtrar Estatus:", ["🟢", "🟡", "🔴"], default=["🟢", "🟡", "🔴"])
 
     # --- 3. MAPA Y LÓGICA ---
     with col_m:
@@ -147,11 +148,18 @@ if status:
                             if dist < (p1['RAD'] + p2['RAD']):
                                 a_int = area_interseccion(p1['RAD'], p2['RAD'], dist)
                                 p_int = round((a_int / (np.pi * p1['RAD']**2)) * 100, 1)
-                                intersecciones.append({"nom": p2['NOM'], "porc": p_int})
+                                if p_int > 0:
+                                    intersecciones.append({"nom": p2['NOM'], "porc": p_int})
                         
-                        tr_real = calcular_traslape_real(p1, otros)
-                        tr_final = round(tr_real, 1)
-                        detalles_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in intersecciones]) if intersecciones else "No traslapado"
+                        if len(intersecciones) == 1:
+                            tr_final = intersecciones[0]['porc']
+                            detalles_txt = f"{intersecciones[0]['nom']} ({intersecciones[0]['porc']}%)"
+                        elif len(intersecciones) > 1:
+                            tr_final = round(calcular_traslape_real(p1, otros), 1)
+                            detalles_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in intersecciones])
+                        else:
+                            tr_final = 0.0
+                            detalles_txt = "No traslapado"
 
                         folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, 
                                      tooltip=f"<b>{p1['NOM']}</b><br>Vol: {int(p1['VOL'])}<br>Traslape: {tr_final}%").add_to(m)
@@ -166,15 +174,17 @@ if status:
             
             c1, c2 = st.columns(2)
             with c1:
-                # SOLUCIÓN MAPA DOBLE: Renderizamos solo el objeto 'm' sin scripts adicionales
-                html_data = m._repr_html_() 
-                st.download_button("🗺️ Mapa HTML", data=html_data, file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
+                map_html = io.BytesIO()
+                m.save(map_html, close_file=False)
+                st.download_button("🗺️ Mapa HTML", data=map_html.getvalue(), file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
             with c2:
                 excel_buf = io.BytesIO()
                 with pd.ExcelWriter(excel_buf, engine='xlsxwriter') as writer:
                     pd.DataFrame(rep).to_excel(writer, index=False, sheet_name='Analisis')
                 st.download_button("📊 Informe Excel", data=excel_buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
 
-            if m_ana and rep: # Solo se muestra si el toggle está activo
+            if m_ana and rep:
                 st.write("---")
-                st.dataframe(pd.DataFrame(rep), use_container_width=True, hide_index=True)
+                df_rep = pd.DataFrame(rep)
+                df_filtrado = df_rep[df_rep['Estatus'].isin(filtro_estatus)]
+                st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
