@@ -22,9 +22,9 @@ def area_interseccion(r1, r2, d):
     return p1 + p2 - p3
 
 def calcular_traslape_real(p1, otros_pts):
-    """Muestreo de 2000 puntos para precisión quirúrgica."""
+    """Muestreo de 3000 puntos para precisión quirúrgica."""
     if not otros_pts: return 0.0
-    n = 2000
+    n = 3000 # Ajustado a 3000 puntos
     ang = np.random.uniform(0, 2*np.pi, n)
     rad = np.sqrt(np.random.uniform(0, 1, n)) * p1['RAD']
     m_grado = 111139
@@ -88,7 +88,6 @@ if status:
                     b = gdf.total_bounds
                     bounds = [[b[1], b[0]], [b[3], b[2]]]
 
-        # --- RESTAURACIÓN DE PLANTILLAS BASE ---
         st.subheader("📥 Plantillas")
         cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"],
                      "Polígonos CP": ["ZONA", "CP", "VOLUMEN"]}
@@ -100,6 +99,7 @@ if status:
         if xl_file and st.button("🔄 Procesar"):
             st.session_state.dict_datos = {p: normalizar(pd.ExcelFile(xl_file).parse(p), modo) for p in pd.ExcelFile(xl_file).sheet_names}
             st.rerun()
+
         if st.session_state.dict_datos:
             pestanas = list(st.session_state.dict_datos.keys())
             sel = st.select_slider("🕒 Pestaña:", options=pestanas) if len(pestanas) > 1 else pestanas[0]
@@ -111,16 +111,14 @@ if status:
             ver_n = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             m_ana = st.toggle("🔍 Tabla de Análisis", value=False)
 
-    # --- 3. MAPA (EN COLUMNA IZQUIERDA) ---
+    # --- 3. MAPA Y LÓGICA ---
     with col_m:
         if st.session_state.dict_datos:
-            # DEFINICIÓN DE VARIABLES
             df_v = df_act[df_act['R_ID'].isin(acts)].copy()
             m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             clrs = {0:"#FFF", 1:"#FF0", 2:"#FFA500", 3:"#F00", 4:"#FF4500", 5:"#800000"}
             rep = []
 
-            # A. LÓGICA PARA POLÍGONOS CP
             if "Polígonos" in modo and gdf is not None:
                 if bounds: m.fit_bounds(bounds)
                 df_v['K'] = df_v['CP'].astype(str).str.zfill(5)
@@ -136,7 +134,6 @@ if status:
                             c = r['geometry'].centroid
                             folium.Marker([c.y, c.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-align:center; width:80px;">{n_dict[cp]}</div>')).add_to(m)
 
-            # B. LÓGICA PARA COORDENADAS
             if 'LAT' in df_v.columns and 'LON' in df_v.columns:
                 df_c = df_v[(df_v['LAT'] != 0) & (df_v['LON'] != 0)]
                 if not df_c.empty:
@@ -144,7 +141,6 @@ if status:
                     pts = df_c.to_dict('records')
                     for i, p1 in enumerate(pts):
                         otros = [p for j, p in enumerate(pts) if i != j]
-                        
                         intersecciones = []
                         for p2 in otros:
                             dist = np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2) * 111139
@@ -154,62 +150,31 @@ if status:
                                 intersecciones.append({"nom": p2['NOM'], "porc": p_int})
                         
                         tr_real = calcular_traslape_real(p1, otros)
-                        
-                        if len(intersecciones) == 1:
-                            tr_final = intersecciones[0]['porc']
-                            detalles_txt = f"{intersecciones[0]['nom']} ({intersecciones[0]['porc']}%)"
-                        else:
-                            tr_final = round(tr_real, 1)
-                            detalles_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in intersecciones]) if intersecciones else "No traslapado"
+                        tr_final = round(tr_real, 1)
+                        detalles_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in intersecciones]) if intersecciones else "No traslapado"
 
                         folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, 
                                      tooltip=f"<b>{p1['NOM']}</b><br>Vol: {int(p1['VOL'])}<br>Traslape: {tr_final}%").add_to(m)
-                        
                         if ver_n: 
                             folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(
                                 html=f'<div style="font-size:9pt; font-weight:bold; color:#000; width:150px;">{p1["NOM"]}</div>')).add_to(m)
                         
-                        rep.append({
-                            "Estatus": "🔴" if tr_final > 50 else "🟡" if tr_final > 15 else "🟢", 
-                            "Zona": p1['NOM'], 
-                            "% Traslape Real": f"{tr_final}%", 
-                            "Traslapado con": detalles_txt
-                        })
+                        rep.append({"Estatus": "🔴" if tr_final > 50 else "🟡" if tr_final > 15 else "🟢", 
+                                    "Zona": p1['NOM'], "% Traslape Real": f"{tr_final}%", "Traslapado con": detalles_txt})
 
-            # C. RENDERIZADO DEL MAPA EN APP
             st_folium(m, width="100%", height=550, key="mapa_fijo", returned_objects=[])
             
             c1, c2 = st.columns(2)
-            
             with c1:
-                # SOLUCIÓN DEFINITIVA MAPA DOBLE:
-                # Renderizamos y eliminamos scripts sobrantes que causan el duplicado
-                html_puro = m.get_root().render()
-                st.download_button(
-                    label="🗺️ Mapa HTML", 
-                    data=html_puro, 
-                    file_name="mapa_amzl.html", 
-                    mime="text/html", 
-                    use_container_width=True
-                )
-
+                # SOLUCIÓN MAPA DOBLE: Renderizamos solo el objeto 'm' sin scripts adicionales
+                html_data = m._repr_html_() 
+                st.download_button("🗺️ Mapa HTML", data=html_data, file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
             with c2:
-                # BOTÓN EXCEL
-                import io
                 excel_buf = io.BytesIO()
                 with pd.ExcelWriter(excel_buf, engine='xlsxwriter') as writer:
                     pd.DataFrame(rep).to_excel(writer, index=False, sheet_name='Analisis')
-                
-                st.download_button(
-                    label="📊 Informe Excel", 
-                    data=excel_buf.getvalue(), 
-                    file_name="analisis.xlsx", 
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
+                st.download_button("📊 Informe Excel", data=excel_buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
 
-            # CONTROL DE LA TABLA (Solo se ve si el Toggle está activo)
-            # Reemplaza 'ver_tabla' por el nombre de la variable de tu st.toggle("Tabla de Análisis")
-            if st.session_state.get('tabla_analisis', True) and rep: 
+            if m_ana and rep: # Solo se muestra si el toggle está activo
                 st.write("---")
                 st.dataframe(pd.DataFrame(rep), use_container_width=True, hide_index=True)
