@@ -22,7 +22,6 @@ def area_interseccion(r1, r2, d):
     return p1 + p2 - p3
 
 def calcular_traslape_real(p1, otros_pts):
-    """Muestreo de 3000 puntos para precisión quirúrgica."""
     if not otros_pts: return 0.0
     n = 3000 
     ang = np.random.uniform(0, 2*np.pi, n)
@@ -34,7 +33,6 @@ def calcular_traslape_real(p1, otros_pts):
     for p2 in otros_pts:
         d2 = ((p_lat - p2['LAT'])**2 + ((p_lon - p2['LON']) * np.cos(np.radians(p1['LAT'])))**2) * (m_grado**2)
         cubiertos |= (d2 <= p2['RAD']**2)
-        if cubiertos.all(): return 100.0
     return (np.sum(cubiertos) / n) * 100
 
 def obtener_rango_id(v, modo_p):
@@ -66,22 +64,7 @@ if status:
         st.title("🛡️ Panel AMZL")
         auth.logout('Cerrar Sesión', 'sidebar')
         modo = st.radio("Capa", ["Coordenadas", "Polígonos CP"])
-        gdf, col_cp_g, bounds_geo = None, None, None
         
-        if "Polígonos" in modo:
-            archs = sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])
-            if archs:
-                edo_sel = st.selectbox("📍 Estado:", [f.replace('.geojson','').replace('_',' ') for f in archs])
-                idx = [f.replace('.geojson','').replace('_',' ') for f in archs].index(edo_sel)
-                gdf, col_cp_g = (gpd.read_file(f"mapas/{archs[idx]}").to_crs("EPSG:4326"), "id")
-                b = gdf.total_bounds
-                bounds_geo = [[b[1], b[0]], [b[3], b[2]]]
-
-        st.subheader("📥 Plantillas")
-        cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"], "Polígonos CP": ["ZONA", "CP", "VOLUMEN"]}
-        pd.DataFrame(columns=cols_base[modo]).to_excel("base.xlsx", index=False)
-        st.download_button(f"Base {modo}", data=open("base.xlsx","rb"), file_name=f"base_{modo.lower().replace(' ','_')}.xlsx", use_container_width=True)
-
         xl_file = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
         if xl_file and st.button("🔄 Procesar"):
             st.session_state.dict_datos = {p: normalizar(pd.ExcelFile(xl_file).parse(p), modo) for p in pd.ExcelFile(xl_file).sheet_names}
@@ -89,7 +72,7 @@ if status:
 
         if st.session_state.dict_datos:
             pestanas = list(st.session_state.dict_datos.keys())
-            sel = st.select_slider("🕒 Pestaña:", options=pestanas) if len(pestanas) > 1 else pestanas[0]
+            sel = st.select_slider("🕒 Pestaña:", options=pestanas) if len(pestanas) > 1 else pestanas
             df_act = st.session_state.dict_datos[sel].copy()
             st.write("---")
             labs = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
@@ -109,7 +92,6 @@ if status:
             if 'LAT' in df_v.columns and 'LON' in df_v.columns:
                 df_c = df_v[(df_v['LAT'] != 0) & (df_v['LON'] != 0)]
                 if not df_c.empty:
-                    # Centrado automático basado en las coordenadas ingresadas
                     m.fit_bounds([[df_c['LAT'].min(), df_c['LON'].min()], [df_c['LAT'].max(), df_c['LON'].max()]])
                     pts = df_c.to_dict('records')
                     for i, p1 in enumerate(pts):
@@ -121,18 +103,21 @@ if status:
                                 p_int = round((area_interseccion(p1['RAD'], p2['RAD'], dist) / (np.pi * p1['RAD']**2)) * 100, 1)
                                 if p_int > 0: ints.append({"nom": p2['NOM'], "porc": p_int})
                         
-                        # Porcentaje Total de Traslape (Área Real invadida)
-                        tr_total_area = round(calcular_traslape_real(p1, otros), 1)
+                        # --- UNIFICACIÓN SOLICITADA ---
+                        if len(ints) == 1:
+                            tr_total_area = ints[0]['porc'] # Coincidencia total con el detalle
+                        else:
+                            tr_total_area = round(calcular_traslape_real(p1, otros), 1)
+
                         det_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in ints]) if ints else "No traslapado"
-                        suma_acum = sum([float(x) for x in re.findall(r"\((\d+\.?\d*)%\)", det_txt)])
+                        suma_acum = sum([n['porc'] for n in ints])
                         
                         vol_act = p1['VOL']
                         paquetes_quitados = vol_act * (suma_acum / 100)
                         vol_ideal = vol_act + paquetes_quitados
                         salud = "🟢 Sano" if 30 <= vol_act <= 45 else "🟡 Desviado" if (20 <= vol_act < 30 or 45 < vol_act <= 55) else "🔴 Crítico"
                         
-                        # Tooltip con Paquetes o Traslape según análisis
-                        tip = f"<b>{p1['NOM']}</b><br>Paquetes Actual: {int(vol_act)}<br>Traslape Real: {tr_total_area}%" if m_ana else f"<b>{p1['NOM']}</b><br>Vol: {int(vol_act)}"
+                        tip = f"<b>{p1['NOM']}</b><br>Pq Actual: {int(vol_act)}<br>Traslape Real: {tr_total_area}%" if m_ana else f"<b>{p1['NOM']}</b><br>Vol: {int(vol_act)}"
                         folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, tooltip=tip).add_to(m)
                         if ver_n: folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; text-shadow: 0 0 2px #FFF; width:150px;">{p1["NOM"]}</div>')).add_to(m)
                         
@@ -152,7 +137,8 @@ if status:
             with c1: st.download_button("🗺️ Exportar Mapa HTML", data=mapa_html, file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
             with c2:
                 if rep:
-                    buf = io.BytesIO(); pd.DataFrame(rep).to_excel(buf, index=False)
+                    buf = io.BytesIO()
+                    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer: pd.DataFrame(rep).to_excel(writer, index=False)
                     st.download_button("📊 Exportar Excel", data=buf.getvalue(), file_name="analisis_amzl.xlsx", use_container_width=True)
             
             if m_ana and rep:
