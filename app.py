@@ -176,31 +176,35 @@ if status:
                             "Traslapado con": detalles_txt
                         })
 
-                        # C. RENDERIZADO Y BOTONES
+                                   # C. RENDERIZADO Y BOTONES
             st_folium(m, width="100%", height=550, key="mapa_fijo", returned_objects=[])
             
             c1, c2 = st.columns(2)
+            
             with c1:
-                # Para evitar el mapa doble, guardamos en un buffer de texto
                 import io
-                output = io.BytesIO()
-                m.save(output, close_file=False)
-                
+                map_buf = io.BytesIO()
+                m.save(map_buf, close_file=False)
                 st.download_button(
-                    "🗺️ Mapa HTML", 
-                    data=output.getvalue(), 
+                    label="🗺️ Mapa HTML", 
+                    data=map_buf.getvalue(), 
                     file_name="mapa_amzl.html", 
                     mime="text/html", 
                     use_container_width=True
                 )
 
             with c2:
-                st.download_button(
-                    "📊 Informe Excel", 
-                    data=buf.getvalue(), 
-                    file_name="analisis.xlsx", 
-                    use_container_width=True
-                )
+                # VERIFICACIÓN: Solo mostramos el botón si 'buf' existe
+                if 'buf' in locals() or 'buf' in globals():
+                    st.download_button(
+                        label="📊 Informe Excel", 
+                        data=buf.getvalue(), 
+                        file_name="analisis.xlsx", 
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                else:
+                    st.warning("⚠️ Informe Excel no generado")
             
             if m_ana and rep: 
                 st.write("---")
