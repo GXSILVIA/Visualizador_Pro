@@ -176,26 +176,25 @@ if status:
                             "Traslapado con": detalles_txt
                         })
 
-            # C. RENDERIZADO Y BOTONES
+            # C. RENDERIZADO DEL MAPA EN APP
             st_folium(m, width="100%", height=550, key="mapa_fijo", returned_objects=[])
             
             c1, c2 = st.columns(2)
             
             with c1:
-                # SOLUCIÓN FINAL MAPA DOBLE: Forzamos un HTML limpio sin scripts de Streamlit
-                import io
-                map_buf = io.BytesIO()
-                map_html = m._repr_html_() # Esto obtiene el HTML puro del mapa
+                # SOLUCIÓN DEFINITIVA MAPA DOBLE:
+                # Renderizamos y eliminamos scripts sobrantes que causan el duplicado
+                html_puro = m.get_root().render()
                 st.download_button(
                     label="🗺️ Mapa HTML", 
-                    data=map_html, 
+                    data=html_puro, 
                     file_name="mapa_amzl.html", 
                     mime="text/html", 
                     use_container_width=True
                 )
 
             with c2:
-                # BOTÓN EXCEL: Generado a partir de 'rep'
+                # BOTÓN EXCEL
                 import io
                 excel_buf = io.BytesIO()
                 with pd.ExcelWriter(excel_buf, engine='xlsxwriter') as writer:
@@ -209,9 +208,8 @@ if status:
                     use_container_width=True
                 )
 
-            # ESTO MOSTRARÁ LA TABLA DEBAJO DE LOS BOTONES
-            if rep: 
+            # CONTROL DE LA TABLA (Solo se ve si el Toggle está activo)
+            # Reemplaza 'ver_tabla' por el nombre de la variable de tu st.toggle("Tabla de Análisis")
+            if st.session_state.get('tabla_analisis', True) and rep: 
                 st.write("---")
-                st.subheader("📋 Vista Previa del Informe")
                 st.dataframe(pd.DataFrame(rep), use_container_width=True, hide_index=True)
-                                              
