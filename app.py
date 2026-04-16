@@ -8,9 +8,9 @@ import geopandas as gpd
 import os, io, yaml, numpy as np
 from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
-from streamlit_folium import st_folium
+import streamlit.components.v1 as components
 
-# --- 1. CONFIGURACIÓN E INTELIGENCIA GEOGRÁFICA ---
+# --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="Sistema Pro AMZL", layout="wide")
 
 def area_interseccion(r1, r2, d):
@@ -22,7 +22,6 @@ def area_interseccion(r1, r2, d):
     return p1 + p2 - p3
 
 def calcular_traslape_real(p1, otros_pts):
-    """Muestreo de 3000 puntos para precisión quirúrgica."""
     if not otros_pts: return 0.0
     n = 3000 
     ang = np.random.uniform(0, 2*np.pi, n)
@@ -63,7 +62,7 @@ def normalizar(df, modo):
     df['R_ID'] = df['VOL'].apply(lambda x: obtener_rango_id(x, "Polígonos" in modo))
     return df
 
-# --- 2. SEGURIDAD Y PANEL ---
+# --- 2. SEGURIDAD ---
 with open('config.yaml') as f: config = yaml.load(f, SafeLoader)
 auth = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
 name, status, user = auth.login(location='main')
@@ -103,10 +102,9 @@ if status:
             acts = [i for i, l in enumerate(labs) if cols[i%3].checkbox(l, value=True, key=f"r{i}{sel}")]
             ver_n = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             m_ana = st.toggle("🔍 Tabla de Análisis", value=False)
-            if m_ana:
-                f_estatus = st.multiselect("Filtrar Estatus:", ["🟢", "🟡", "🔴"], default=["🟢", "🟡", "🔴"])
+            if m_ana: f_estatus = st.multiselect("Filtrar Estatus:", ["🟢", "🟡", "🔴"], default=["🟢", "🟡", "🔴"])
 
-    # --- 3. LÓGICA DE MAPA (SIN PARPADEO) ---
+    # --- 3. LÓGICA DE MAPA ---
     with col_m:
         if st.session_state.dict_datos:
             df_v = df_act[df_act['R_ID'].isin(acts)].copy()
@@ -114,7 +112,6 @@ if status:
             clrs = {0:"#FFF", 1:"#FF0", 2:"#FFA500", 3:"#F00", 4:"#FF4500", 5:"#800000"}
             rep = []
 
-            # A. Renderizado de Capas
             if "Polígonos" in modo and gdf is not None:
                 if bounds: m.fit_bounds(bounds)
                 v_dict = df_v.set_index('CP')['VOL'].to_dict()
@@ -136,36 +133,33 @@ if status:
                     pts = df_c.to_dict('records')
                     for i, p1 in enumerate(pts):
                         otros = [p for j, p in enumerate(pts) if i != j]
-                        intersecciones = []
+                        ints = []
                         for p2 in otros:
                             dist = np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2) * 111139
                             if dist < (p1['RAD'] + p2['RAD']):
                                 p_int = round((area_interseccion(p1['RAD'], p2['RAD'], dist) / (np.pi * p1['RAD']**2)) * 100, 1)
-                                if p_int > 0: intersecciones.append({"nom": p2['NOM'], "porc": p_int})
+                                if p_int > 0: ints.append({"nom": p2['NOM'], "porc": p_int})
                         
-                        if len(intersecciones) == 1:
-                            tr_final, det_txt = intersecciones[0]['porc'], f"{intersecciones[0]['nom']} ({intersecciones[0]['porc']}%)"
-                        elif len(intersecciones) > 1:
-                            tr_final, det_txt = round(calcular_traslape_real(p1, otros), 1), ", ".join([f"{n['nom']} ({n['porc']}%)" for n in intersecciones])
+                        if len(ints) == 1:
+                            tr_final, det_txt = ints[0]['porc'], f"{ints[0]['nom']} ({ints[0]['porc']}%)"
+                        elif len(ints) > 1:
+                            tr_final, det_txt = round(calcular_traslape_real(p1, otros), 1), ", ".join([f"{n['nom']} ({n['porc']}%)" for n in ints])
                         else:
                             tr_final, det_txt = 0.0, "No traslapado"
 
                         folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, 
                                      tooltip=f"<b>{p1['NOM']}</b><br>Traslape: {tr_final}%").add_to(m)
                         if ver_n: 
-                            folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; width:150px;">{p1["NOM"]}</div>')).add_to(m)
+                            folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; text-shadow: 0 0 3px #FFF; width:150px;">{p1["NOM"]}</div>')).add_to(m)
                         rep.append({"Estatus": "🔴" if tr_final > 50 else "🟡" if tr_final > 15 else "🟢", "Zona": p1['NOM'], "% Traslape Real": f"{tr_final}%", "Traslapado con": det_txt})
 
-            # B. Renderizado y Descarga (SOLUCIÓN MAPA DOBLE)
-            # Cambia esto al final de tu bloque de mapa:
-            st_folium(m, width="100%", height=550, key="mapa_fijo_amzl")
-
+            # SOLUCIÓN DEFINITIVA: Renderizado estático via components para evitar parpadeo y duplicados
+            mapa_html = m.get_root().render()
+            components.html(mapa_html, height=550)
             
             c1, c2 = st.columns(2)
-           with c1:
-    # Esta es la forma más limpia de exportar un solo mapa
-                 html_puro = m.get_root().render() 
-                 st.download_button("🗺️ Mapa HTML", data=html_puro, file_name="mapa_amzl.html", mime="text/html", use_container_width=True)            with c2:
+            with c1: st.download_button("🗺️ Mapa HTML", data=mapa_html, file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
+            with c2:
                 if rep:
                     buf = io.BytesIO(); pd.DataFrame(rep).to_excel(buf, index=False)
                     st.download_button("📊 Informe Excel", data=buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
