@@ -9,6 +9,7 @@ import os, io, yaml, numpy as np, time
 from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
 from streamlit_folium import st_folium
+from branca.element import Figure
 
 # --- 1. CONFIGURACIÓN E INTELIGENCIA GEOGRÁFICA ---
 st.set_page_config(page_title="Sistema Pro AMZL", layout="wide")
@@ -174,9 +175,10 @@ if status:
             
             c1, c2 = st.columns(2)
             with c1:
-                map_html = io.BytesIO()
-                m.save(map_html, close_file=False)
-                st.download_button("🗺️ Mapa HTML", data=map_html.getvalue(), file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
+                # SOLUCIÓN DEFINITIVA MAPA DOBLE: Branca Figure renderiza un HTML limpio sin duplicar scripts
+                fig = Figure(height="100%", width="100%")
+                fig.add_child(m)
+                st.download_button("🗺️ Mapa HTML", data=fig.render(), file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
             with c2:
                 excel_buf = io.BytesIO()
                 with pd.ExcelWriter(excel_buf, engine='xlsxwriter') as writer:
