@@ -1,4 +1,3 @@
-#utlimo código 2 capas perfecto
 #-*- coding: utf-8 -*-
 # Copyright 2026 Silvia Guadalupe Garcia Espinosa
 
@@ -113,13 +112,24 @@ if status:
             ver_n = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             m_ana = st.toggle("🔍 Tabla de Análisis", value=False)
 
-    # --- 3. MAPA ---
+                rep = []
+            if 'LAT' in df_v.columns and 'LON' in df_v.columns:
+                df_c = df_v[(df_v['LAT'] != 0) & (df_v['LON'] != 0)]
+                if not df_c.empty:
+                    if "Polígonos" not in modo: m.fit_bounds([df_c[['LAT','LON']].min().tolist(), df_c[['LAT','LON']].max().tolist()])
+                    pts = df_c.to_dict('records')
+                    for i, p1 in enumerate(pts):
+                        otros = [p for j, p in enumerate(pts) if i != j]
+                        
+               # --- 3. MAPA ---
     with col_m:
         if st.session_state.dict_datos:
             df_v = df_act[df_act['R_ID'].isin(acts)].copy()
             m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             clrs = {0:"#FFF", 1:"#FF0", 2:"#FFA500", 3:"#F00", 4:"#FF4500", 5:"#800000"}
+            rep = []
 
+            # A. LÓGICA PARA POLÍGONOS CP
             if "Polígonos" in modo and gdf is not None:
                 if bounds: m.fit_bounds(bounds)
                 df_v['K'] = df_v['CP'].astype(str).str.zfill(5)
@@ -129,13 +139,13 @@ if status:
                     cp = str(r[col_cp_g]).zfill(5)
                     if cp in v_dict:
                         folium.GeoJson(r['geometry'], style_function=lambda x, v=v_dict[cp]: {
-                            'fillColor':clrs[obtener_rango_id(v,True)], 'color':'#000', 'weight':1, 'fillOpacity':0.4 # Translucido
+                            'fillColor':clrs[obtener_rango_id(v,True)], 'color':'#000', 'weight':1, 'fillOpacity':0.4
                         }, tooltip=f"<b>{n_dict[cp]}</b><br>Vol: {int(v_dict[cp])}").add_to(m)
                         if ver_n:
                             c = r['geometry'].centroid
                             folium.Marker([c.y, c.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-align:center; width:80px;">{n_dict[cp]}</div>')).add_to(m)
 
-            rep = []
+            # B. LÓGICA PARA COORDENADAS (CON NUEVA REGLA DE TRASLAPE)
             if 'LAT' in df_v.columns and 'LON' in df_v.columns:
                 df_c = df_v[(df_v['LAT'] != 0) & (df_v['LON'] != 0)]
                 if not df_c.empty:
@@ -143,21 +153,56 @@ if status:
                     pts = df_c.to_dict('records')
                     for i, p1 in enumerate(pts):
                         otros = [p for j, p in enumerate(pts) if i != j]
-                        detalles = [f"{p2['NOM']} ({round((area_interseccion(p1['RAD'],p2['RAD'],np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2)*111139)/(np.pi*p1['RAD']**2))*100,1)}%)" 
-                                    for p2 in otros if np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2)*111139 < (p1['RAD']+p2['RAD'])]
-                        tr = calcular_traslape_real(p1, otros)
-                        folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, tooltip=f"<b>{p1['NOM']}</b><br>Vol: {int(p1['VOL'])}").add_to(m)
-                        if ver_n: folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; text-shadow: 0 0 3px #FFF; width:150px;">{p1["NOM"]}</div>')).add_to(m)
-                        rep.append({"Estatus": "🔴" if tr > 50 else "🟡" if tr > 15 else "🟢", "Zona": p1['NOM'], "% Traslape Real": f"{round(tr, 1)}%", "Traslapado con": ", ".join(detalles) if detalles else "No traslapado"})
+                        
+                        # Cálculo de intersecciones individuales
+                        intersecciones = []
+                        for p2 in otros:
+                            dist = np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2) * 111139
+                            if dist < (p1['RAD'] + p2['RAD']):
+                                a_int = area_interseccion(p1['RAD'], p2['RAD'], dist)
+                                p_int = round((a_int / (np.pi * p1['RAD']**2)) * 100, 1)
+                                intersecciones.append({"nom": p2['NOM'], "porc": p_int})
+                        
+                        tr_real = calcular_traslape_real(p1, otros)
+                        
+                        # Aplicación de tu lógica: si es solo 1, igualar valores
+                        if len(intersecciones) == 1:
+                            tr_final = intersecciones[0]['porc']
+                            detalles_txt = f"{intersecciones[0]['nom']} ({intersecciones[0]['porc']}%)"
+                        else:
+                            tr_final = round(tr_real, 1)
+                            detalles_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in intersecciones]) if intersecciones else "No traslapado"
 
-            st_folium(m, width="100%", height=550, key="mapa_fijo")
-            if st.session_state.dict_datos:
-                c1, c2 = st.columns(2)
-                with c1: st.download_button("🗺️ Mapa HTML", data=io.BytesIO(m._repr_html_().encode()).getvalue(), file_name="mapa.html", use_container_width=True)
-                with c2:
-                    if rep:
-                        buf = io.BytesIO(); pd.DataFrame(rep).to_excel(buf, index=False)
-                        st.download_button("📊 Informe Excel", data=buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
-                if m_ana and rep: st.table(pd.DataFrame(rep))
+                        folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, 
+                                     tooltip=f"<b>{p1['NOM']}</b><br>Vol: {int(p1['VOL'])}<br>Traslape: {tr_final}%").add_to(m)
+                        
+                        if ver_n: 
+                            folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(
+                                html=f'<div style="font-size:9pt; font-weight:bold; color:#000; width:150px;">{p1["NOM"]}</div>')).add_to(m)
+                        
+                        rep.append({
+                            "Estatus": "🔴" if tr_final > 50 else "🟡" if tr_final > 15 else "🟢", 
+                            "Zona": p1['NOM'], 
+                            "% Traslape Real": f"{tr_final}%", 
+                            "Traslapado con": detalles_txt
+                        })
+
+            # C. RENDERIZADO Y BOTONES
+            st_folium(m, width="100%", height=550, key="mapa_final")
+            
+            c1, c2 = st.columns(2)
+            with c1: 
+                st.download_button("🗺️ Mapa HTML", data=m._repr_html_(), file_name="mapa.html", mime="text/html", use_container_width=True)
+            with c2:
+                if rep:
+                    buf = io.BytesIO()
+                    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
+                        pd.DataFrame(rep).to_excel(writer, index=False)
+                    st.download_button("📊 Informe Excel", data=buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
+            
+            if m_ana and rep: 
+                st.write("---")
+                st.dataframe(pd.DataFrame(rep), use_container_width=True, hide_index=True)
 
 # --- FIN DEL CÓDIGO ---
+            
