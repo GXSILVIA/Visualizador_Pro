@@ -62,7 +62,7 @@ def normalizar(df, modo):
     df['R_ID'] = df['VOL'].apply(lambda x: obtener_rango_id(x, "Polígonos" in modo))
     return df
 
-# --- 2. SEGURIDAD ---
+# --- 2. SEGURIDAD Y PANEL ---
 with open('config.yaml') as f: config = yaml.load(f, SafeLoader)
 auth = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
 name, status, user = auth.login(location='main')
@@ -81,15 +81,15 @@ if status:
             archs = sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])
             if archs:
                 edo_sel = st.selectbox("📍 Estado:", [f.replace('.geojson','').replace('_',' ') for f in archs])
-                archivo_real = archs[[f.replace('.geojson','').replace('_',' ') for f in archs].index(edo_sel)]
-                gdf, col_cp_g = cargar_geo(archivo_real)
+                idx = [f.replace('.geojson','').replace('_',' ') for f in archs].index(edo_sel)
+                gdf, col_cp_g = cargar_geo(archs[idx])
                 if gdf is not None:
                     b = gdf.total_bounds
                     bounds = [[b[1], b[0]], [b[3], b[2]]]
 
-        # --- BOTONES DE PLANTILLAS BASE ---
+        # --- BOTONES DE PLANTILLAS ---
         st.subheader("📥 Plantillas")
-        cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"],
+        cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"], 
                      "Polígonos CP": ["ZONA", "CP", "VOLUMEN"]}
         buf_p = io.BytesIO()
         pd.DataFrame(columns=cols_base[modo]).to_excel(buf_p, index=False)
@@ -105,9 +105,6 @@ if status:
             sel = st.select_slider("🕒 Pestaña:", options=pestanas) if len(pestanas) > 1 else pestanas[0]
             df_act = st.session_state.dict_datos[sel].copy()
             st.write("---")
-            labs = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
-            cols = st.columns(3)
-            acts = [i for i, l in enumerate(labs) if cols[i%3].checkbox(l, value=True, key=f"r{i}{sel}")]
             ver_n = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             m_ana = st.toggle("🔍 Tabla de Análisis", value=False)
             if m_ana: f_estatus = st.multiselect("Filtrar Salud:", ["🟢 Sano", "🟡 Desviado", "🔴 Crítico"], default=["🟢 Sano", "🟡 Desviado", "🔴 Crítico"])
@@ -115,32 +112,26 @@ if status:
     # --- 3. LÓGICA DE MAPA ---
     with col_m:
         if st.session_state.dict_datos:
-            df_v = df_act[df_act['R_ID'].isin(acts)].copy()
-            m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             clrs = {0:"#FFF", 1:"#FF0", 2:"#FFA500", 3:"#F00", 4:"#FF4500", 5:"#800000"}
+            m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             rep = []
 
             # CAPA POLÍGONOS CP
             if "Polígonos" in modo and gdf is not None:
                 if bounds: m.fit_bounds(bounds)
-                df_v['K'] = df_v['CP'].astype(str).str.zfill(5)
-                v_dict = df_v.set_index('K')['VOL'].to_dict()
-                n_dict = df_v.set_index('K')['NOM'].to_dict()
+                df_v_cp = df_act.set_index('CP')
                 for _, r in gdf.iterrows():
                     cp = str(r[col_cp_g]).zfill(5)
-                    if cp in v_dict:
-                        vol = v_dict[cp]
-                        t_pol = f"<b>{n_dict[cp]}</b><br>Vol: {int(vol)}"
+                    if cp in df_v_cp.index:
+                        vol = df_v_cp.loc[cp, 'VOL']
+                        nom = df_v_cp.loc[cp, 'NOM']
                         folium.GeoJson(r['geometry'], style_function=lambda x, v=vol: {
                             'fillColor':clrs[obtener_rango_id(v,True)], 'color':'#000', 'weight':1, 'fillOpacity':0.4
-                        }, tooltip=t_pol).add_to(m)
-                        if ver_n:
-                            c = r['geometry'].centroid
-                            folium.Marker([c.y, c.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-align:center; width:80px;">{n_dict[cp]}</div>')).add_to(m)
+                        }, tooltip=f"<b>{nom}</b><br>Vol: {int(vol)}").add_to(m)
 
             # CAPA COORDENADAS
-            if 'LAT' in df_v.columns and 'LON' in df_v.columns:
-                df_c = df_v[(df_v['LAT'] != 0) & (df_v['LON'] != 0)]
+            if 'LAT' in df_act.columns and 'LON' in df_act.columns:
+                df_c = df_act[(df_act['LAT'] != 0) & (df_act['LON'] != 0)]
                 if not df_c.empty:
                     if "Polígonos" not in modo: m.fit_bounds([df_c[['LAT','LON']].min().tolist(), df_c[['LAT','LON']].max().tolist()])
                     pts = df_c.to_dict('records')
@@ -155,18 +146,18 @@ if status:
                         
                         tr_final = round(calcular_traslape_real(p1, otros), 1) if len(ints) > 1 else (ints[0]['porc'] if ints else 0.0)
                         det_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in ints]) if ints else "No traslapado"
+                        suma_acum = sum([float(x) for x in re.findall(r"\((\d+\.?\d*)%\)", det_txt)])
                         
                         vol_act = p1['VOL']
-                        vol_ideal = vol_act / (1 - (tr_final/100)) if tr_final < 100 else vol_act
+                        vol_ideal = vol_act / (1 - (suma_acum/100)) if suma_acum < 100 else vol_act
                         salud = "🟢 Sano" if 30 <= vol_act <= 45 else "🟡 Desviado" if (20 <= vol_act < 30 or 45 < vol_act <= 55) else "🔴 Crítico"
 
-                        tooltip_txt = f"<b>{p1['NOM']}</b><br>Salud: {salud}<br>Traslape: {tr_final}%" if m_ana else f"<b>{p1['NOM']}</b><br>Vol: {int(vol_act)}"
-                        folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, tooltip=tooltip_txt).add_to(m)
+                        tip = f"<b>{p1['NOM']}</b><br>Salud: {salud}<br>Traslape Real: {tr_final}%" if m_ana else f"<b>{p1['NOM']}</b><br>Vol: {int(vol_act)}"
+                        folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, tooltip=tip).add_to(m)
                         if ver_n:
-                            folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; text-shadow: 0 0 3px #FFF; width:150px;">{p1["NOM"]}</div>')).add_to(m)
+                            folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; text-shadow: 0 0 2px #FFF; width:150px;">{p1["NOM"]}</div>')).add_to(m)
                         
-                        suma_acum = sum([float(x) for x in re.findall(r"\((\d+\.?\d*)%\)", det_txt)])
-                        rep.append({"Salud": salud, "Zona": p1['NOM'], "Volumen Actual": int(vol_act), "Volumen Ideal": int(vol_ideal), "% Traslape Real": f"{tr_final}%", "Acumulación Traslapes": f"{round(suma_acum, 1)}%", "Traslapado con": det_txt})
+                        rep.append({"Salud": salud, "Zona": p1['NOM'], "Vol. Actual": int(vol_act), "Vol. Ideal (Suma %)": int(vol_ideal), "% Traslape Real": tr_final, "Acumulación %": round(suma_acum, 1), "Traslapado con": det_txt})
 
             mapa_html = m.get_root().render()
             components.html(mapa_html, height=550)
@@ -176,10 +167,10 @@ if status:
             with c2:
                 if rep:
                     buf = io.BytesIO()
-                    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer: pd.DataFrame(rep).to_excel(writer, index=False, sheet_name='Analisis')
+                    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer: pd.DataFrame(rep).to_excel(writer, index=False)
                     st.download_button("📊 Informe Excel", data=buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
             
             if m_ana and rep:
                 st.write("---")
                 df_rep = pd.DataFrame(rep)
-                st.table(df_rep[df_rep['Salud'].isin(f_estatus)])
+                st.dataframe(df_rep[df_rep['Salud'].isin(f_estatus)], use_container_width=True, hide_index=True)
