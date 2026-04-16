@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import folium
 import geopandas as gpd
-import os, io, yaml, numpy as np, time
+import os, io, yaml, numpy as np
 from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
 from streamlit_folium import st_folium
@@ -88,12 +88,6 @@ if status:
                     b = gdf.total_bounds
                     bounds = [[b[1], b[0]], [b[3], b[2]]]
 
-        st.subheader("📥 Plantillas")
-        cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"], "Polígonos CP": ["ZONA", "CP", "VOLUMEN"]}
-        buf_p = io.BytesIO()
-        pd.DataFrame(columns=cols_base[modo]).to_excel(buf_p, index=False)
-        st.download_button(f"Base {modo}", data=buf_p.getvalue(), file_name=f"base_{modo.lower().replace(' ','_')}.xlsx", use_container_width=True)
-
         xl_file = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
         if xl_file and st.button("🔄 Procesar"):
             st.session_state.dict_datos = {p: normalizar(pd.ExcelFile(xl_file).parse(p), modo) for p in pd.ExcelFile(xl_file).sheet_names}
@@ -112,7 +106,7 @@ if status:
             if m_ana:
                 f_estatus = st.multiselect("Filtrar Estatus:", ["🟢", "🟡", "🔴"], default=["🟢", "🟡", "🔴"])
 
-    # --- 3. MAPA Y LÓGICA ---
+    # --- 3. LÓGICA DE MAPA (SIN PARPADEO) ---
     with col_m:
         if st.session_state.dict_datos:
             df_v = df_act[df_act['R_ID'].isin(acts)].copy()
@@ -120,11 +114,11 @@ if status:
             clrs = {0:"#FFF", 1:"#FF0", 2:"#FFA500", 3:"#F00", 4:"#FF4500", 5:"#800000"}
             rep = []
 
+            # A. Renderizado de Capas
             if "Polígonos" in modo and gdf is not None:
                 if bounds: m.fit_bounds(bounds)
-                df_v['K'] = df_v['CP'].astype(str).str.zfill(5)
-                v_dict = df_v.set_index('K')['VOL'].to_dict()
-                n_dict = df_v.set_index('K')['NOM'].to_dict()
+                v_dict = df_v.set_index('CP')['VOL'].to_dict()
+                n_dict = df_v.set_index('CP')['NOM'].to_dict()
                 for _, r in gdf.iterrows():
                     cp = str(r[col_cp_g]).zfill(5)
                     if cp in v_dict:
@@ -146,43 +140,35 @@ if status:
                         for p2 in otros:
                             dist = np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2) * 111139
                             if dist < (p1['RAD'] + p2['RAD']):
-                                a_calc = area_interseccion(p1['RAD'], p2['RAD'], dist)
-                                p_int = round((a_calc / (np.pi * p1['RAD']**2)) * 100, 1)
-                                if p_int > 0:
-                                    intersecciones.append({"nom": p2['NOM'], "porc": p_int})
+                                p_int = round((area_interseccion(p1['RAD'], p2['RAD'], dist) / (np.pi * p1['RAD']**2)) * 100, 1)
+                                if p_int > 0: intersecciones.append({"nom": p2['NOM'], "porc": p_int})
                         
                         if len(intersecciones) == 1:
-                            tr_final = intersecciones[0]['porc']
-                            det_txt = f"{intersecciones[0]['nom']} ({intersecciones[0]['porc']}%)"
+                            tr_final, det_txt = intersecciones[0]['porc'], f"{intersecciones[0]['nom']} ({intersecciones[0]['porc']}%)"
                         elif len(intersecciones) > 1:
-                            tr_final = round(calcular_traslape_real(p1, otros), 1)
-                            det_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in intersecciones])
+                            tr_final, det_txt = round(calcular_traslape_real(p1, otros), 1), ", ".join([f"{n['nom']} ({n['porc']}%)" for n in intersecciones])
                         else:
-                            tr_final = 0.0
-                            det_txt = "No traslapado"
+                            tr_final, det_txt = 0.0, "No traslapado"
 
                         folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, 
-                                     tooltip=f"<b>{p1['NOM']}</b><br>Vol: {int(p1['VOL'])}<br>Traslape: {tr_final}%").add_to(m)
+                                     tooltip=f"<b>{p1['NOM']}</b><br>Traslape: {tr_final}%").add_to(m)
                         if ver_n: 
-                            folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(
-                                html=f'<div style="font-size:9pt; font-weight:bold; color:#000; text-shadow: 0 0 3px #FFF; width:150px;">{p1["NOM"]}</div>')).add_to(m)
-                        
-                        rep.append({"Estatus": "🔴" if tr_final > 50 else "🟡" if tr_final > 15 else "🟢", 
-                                    "Zona": p1['NOM'], "% Traslape Real": f"{tr_final}%", "Traslapado con": det_txt})
+                            folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; width:150px;">{p1["NOM"]}</div>')).add_to(m)
+                        rep.append({"Estatus": "🔴" if tr_final > 50 else "🟡" if tr_final > 15 else "🟢", "Zona": p1['NOM'], "% Traslape Real": f"{tr_final}%", "Traslapado con": det_txt})
 
-            st_folium(m, width="100%", height=550, use_container_width=True, key=f"mapa_{modo}_{sel}")
+            # B. Renderizado y Descarga (SOLUCIÓN MAPA DOBLE)
+            st_folium(m, width="100%", height=550, key="mapa_estatico")
             
-            if st.session_state.dict_datos:
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.download_button("🗺️ Mapa HTML", data=m.get_root().render(), file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
-                with c2:
-                    if rep:
-                        buf = io.BytesIO()
-                        pd.DataFrame(rep).to_excel(buf, index=False)
-                        st.download_button("📊 Informe Excel", data=buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
-                
-                if m_ana and rep:
-                    st.write("---")
-                    df_rep = pd.DataFrame(rep)
-                    st.table(df_rep[df_rep['Estatus'].isin(f_estatus)])
+            c1, c2 = st.columns(2)
+            with c1:
+                # El secreto para no duplicar es usar repr_html de un objeto limpio
+                st.download_button("🗺️ Mapa HTML", data=m._repr_html_(), file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
+            with c2:
+                if rep:
+                    buf = io.BytesIO(); pd.DataFrame(rep).to_excel(buf, index=False)
+                    st.download_button("📊 Informe Excel", data=buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
+            
+            if m_ana and rep:
+                st.write("---")
+                df_rep = pd.DataFrame(rep)
+                st.table(df_rep[df_rep['Estatus'].isin(f_estatus)])
