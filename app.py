@@ -177,7 +177,7 @@ if status:
                         })
 
             # C. RENDERIZADO Y BOTONES
-            st_folium(m, width="100%", height=550, key="mapa_final")
+            st_folium(m, width="100%", height=550, key="mapa_fijo", returned_objects=[])
             
             c1, c2 = st.columns(2)
             with c1: 
