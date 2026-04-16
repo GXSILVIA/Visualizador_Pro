@@ -127,7 +127,6 @@ if status:
             df_v = df_act[df_act['R_ID'].isin(acts)].copy()
             m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             clrs = {0:"#FFF", 1:"#FF0", 2:"#FFA500", 3:"#F00", 4:"#FF4500", 5:"#800000"}
-            
             rep = []
 
             # A. LÓGICA PARA POLÍGONOS CP
