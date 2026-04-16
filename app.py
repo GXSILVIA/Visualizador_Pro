@@ -180,13 +180,16 @@ if status:
             st_folium(m, width="100%", height=550, key="mapa_fijo", returned_objects=[])
             
             c1, c2 = st.columns(2)
-            with c1: 
-                st.download_button("🗺️ Mapa HTML", data=m._repr_html_(), file_name="mapa.html", mime="text/html", use_container_width=True)
-            with c2:
-                if rep:
-                    buf = io.BytesIO()
-                    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-                        pd.DataFrame(rep).to_excel(writer, index=False)
+                       with c1: 
+                # Usamos render() para obtener el HTML limpio del objeto mapa
+                html_mapa = m.get_root().render()
+                st.download_button(
+                    "🗺️ Mapa HTML", 
+                    data=html_mapa, 
+                    file_name="mapa_amzl.html", 
+                    mime="text/html", 
+                    use_container_width=True
+                )
                     st.download_button("📊 Informe Excel", data=buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
             
             if m_ana and rep: 
