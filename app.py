@@ -65,9 +65,16 @@ if status:
         auth.logout('Cerrar Sesión', 'sidebar')
         modo = st.radio("Capa", ["Coordenadas", "Polígonos CP"])
         
+        # --- PLANTILLAS BASE RESTAURADAS ---
+        st.subheader("📥 Plantillas")
+        cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"], 
+                     "Polígonos CP": ["ZONA", "CP", "VOLUMEN"]}
+        buf_base = io.BytesIO()
+        pd.DataFrame(columns=cols_base[modo]).to_excel(buf_base, index=False)
+        st.download_button(f"Base {modo}", data=buf_base.getvalue(), file_name=f"base_{modo.lower().replace(' ','_')}.xlsx", use_container_width=True)
+
         xl_file = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
         if xl_file and st.button("🔄 Procesar"):
-            # Carga directa de la primera pestaña
             st.session_state.df_datos = normalizar(pd.read_excel(xl_file), modo)
             st.rerun()
 
@@ -118,7 +125,7 @@ if status:
                             "Salud": salud, "Zona": p1['NOM'], "Paquetes Actual": int(vol_act), 
                             "Paquetes Perdidos": round(pq_perdidos, 1),
                             "Potencial Ideal": round(vol_act + pq_perdidos, 1),
-                            "% Traslape Real": f"{tr_total_area}%",
+                            "% Traslape Total (Área)": f"{tr_total_area}%",
                             "% Acumulado": f"{round(suma_acum, 1)}%", 
                             "Detalle": det_txt
                         })
@@ -127,12 +134,12 @@ if status:
             components.html(mapa_html, height=550)
             
             c1, c2 = st.columns(2)
-            with c1: st.download_button("🗺️ Mapa HTML", data=mapa_html, file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
+            with c1: st.download_button("🗺️ Exportar Mapa HTML", data=mapa_html, file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
             with c2:
                 if rep:
                     buf = io.BytesIO()
                     with pd.ExcelWriter(buf, engine='xlsxwriter') as wr: pd.DataFrame(rep).to_excel(wr, index=False)
-                    st.download_button("📊 Informe Excel", data=buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
+                    st.download_button("📊 Exportar Excel", data=buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
             
             if m_ana and rep:
                 st.write("---")
