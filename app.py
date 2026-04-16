@@ -51,7 +51,7 @@ def normalizar(df, modo):
     df['R_ID'] = df['VOL'].apply(lambda x: obtener_rango_id(x, "Polígonos" in modo))
     return df
 
-# --- 2. SEGURIDAD ---
+# --- 2. SEGURIDAD Y PANEL ---
 with open('config.yaml') as f: config = yaml.load(f, SafeLoader)
 auth = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
 name, status, user = auth.login(location='main')
@@ -67,22 +67,24 @@ if status:
         
         gdf, col_cp_g, bounds_geo = None, None, None
         
-        # --- RESTAURACIÓN SELECTOR ESTADO ---
+        # --- FILTRO DE ESTADO (SOLO EN POLÍGONOS) ---
         if "Polígonos" in modo:
             archs = sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])
             if archs:
-                edo_sel = st.selectbox("📍 Estado:", [f.replace('.geojson','').replace('_',' ') for f in archs])
+                edo_sel = st.selectbox("📍 Elegir Estado:", [f.replace('.geojson','').replace('_',' ') for f in archs])
                 idx = [f.replace('.geojson','').replace('_',' ') for f in archs].index(edo_sel)
                 gdf = gpd.read_file(f"mapas/{archs[idx]}").to_crs("EPSG:4326")
                 col_cp_g = next((c for c in ['d_cp','CP','CODIGOPOSTAL'] if c in gdf.columns), gdf.columns[0])
                 b = gdf.total_bounds
                 bounds_geo = [[b[1], b[0]], [b[3], b[2]]]
 
+        # --- PLANTILLAS BASE SEGÚN MODO ---
         st.subheader("📥 Plantillas")
-        cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"], "Polígonos CP": ["ZONA", "CP", "VOLUMEN"]}
-        buf_base = io.BytesIO()
-        pd.DataFrame(columns=cols_base[modo]).to_excel(buf_base, index=False)
-        st.download_button(f"Base {modo}", data=buf_base.getvalue(), file_name=f"base_{modo.lower().replace(' ','_')}.xlsx", use_container_width=True)
+        cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"], 
+                     "Polígonos CP": ["ZONA", "CP", "VOLUMEN"]}
+        buf_p = io.BytesIO()
+        pd.DataFrame(columns=cols_base[modo]).to_excel(buf_p, index=False)
+        st.download_button(f"Base {modo}", data=buf_p.getvalue(), file_name=f"base_{modo.lower().replace(' ','_')}.xlsx", use_container_width=True)
 
         xl_file = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
         if xl_file and st.button("🔄 Procesar"):
@@ -92,11 +94,12 @@ if status:
         if st.session_state.df_datos is not None:
             df_act = st.session_state.df_datos.copy()
             st.write("---")
+            # RANGOS SEGÚN MODO
             labs = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
             cols = st.columns(3); acts = [i for i, l in enumerate(labs) if cols[i%3].checkbox(l, value=True, key=f"r{i}")]
             ver_n = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             m_ana = st.toggle("🔍 Tabla de Análisis", value=False)
-            if m_ana: f_estatus = st.multiselect("Salud Zona:", ["🟢 Sano", "🟡 Desviado", "🔴 Crítico"], default=["🟢 Sano", "🟡 Desviado", "🔴 Crítico"])
+            if m_ana: f_estatus = st.multiselect("Salud:", ["🟢 Sano", "🟡 Desviado", "🔴 Crítico"], default=["🟢 Sano", "🟡 Desviado", "🔴 Crítico"])
 
     # --- 3. LÓGICA DE MAPA ---
     with col_m:
@@ -113,8 +116,7 @@ if status:
                 for _, r in gdf.iterrows():
                     cp = str(r[col_cp_g]).zfill(5)
                     if cp in df_v_cp.index:
-                        vol = df_v_cp.loc[cp, 'VOL']
-                        nom = df_v_cp.loc[cp, 'NOM']
+                        vol, nom = df_v_cp.loc[cp, 'VOL'], df_v_cp.loc[cp, 'NOM']
                         folium.GeoJson(r['geometry'], style_function=lambda x, v=vol: {
                             'fillColor':clrs[obtener_rango_id(v,True)], 'color':'#000', 'weight':1, 'fillOpacity':0.4
                         }, tooltip=f"<b>{nom}</b><br>Vol: {int(vol)}").add_to(m)
@@ -137,23 +139,18 @@ if status:
                                 p_int = round((area_interseccion(p1['RAD'], p2['RAD'], dist) / (np.pi * p1['RAD']**2)) * 100, 1)
                                 if p_int > 0: ints.append({"nom": p2['NOM'], "porc": p_int})
                         
-                        tr_total_area = ints['porc'] if len(ints) == 1 else round(calcular_traslape_real(p1, otros), 1)
+                        tr_total = ints[0]['porc'] if len(ints) == 1 else round(calcular_traslape_real(p1, otros), 1)
                         det_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in ints]) if ints else "No traslapado"
                         suma_acum = sum([n['porc'] for n in ints])
-                        
                         vol_act = p1['VOL']
                         pq_perdidos = vol_act * (suma_acum / 100)
                         salud = "🟢 Sano" if 30 <= vol_act <= 45 else "🟡 Desviado" if (20 <= vol_act < 30 or 45 < vol_act <= 55) else "🔴 Crítico"
                         
-                        tip = f"<b>{p1['NOM']}</b><br>Traslape Real: {tr_total_area}%" if m_ana else f"<b>{p1['NOM']}</b><br>Vol: {int(vol_act)}"
+                        tip = f"<b>{p1['NOM']}</b><br>Pq Actual: {int(vol_act)}<br>Traslape Real: {tr_total}%" if m_ana else f"<b>{p1['NOM']}</b><br>Vol: {int(vol_act)}"
                         folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, tooltip=tip).add_to(m)
-                        if ver_n: folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; text-shadow: 0 0 2px #FFF; width:150px;">{p1["NOM"]}</div>')).add_to(m)
-                        
-                        rep.append({
-                            "Salud": salud, "Zona": p1['NOM'], "Paquetes Actual": int(vol_act), 
-                            "Paquetes Perdidos": round(pq_perdidos, 1), "Potencial Ideal": round(vol_act + pq_perdidos, 1),
-                            "% Traslape Total (Área)": f"{tr_total_area}%", "% Acumulado": f"{round(suma_acum, 1)}%", "Detalle": det_txt
-                        })
+                        if ver_n:
+                            folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; text-shadow: 0 0 2px #FFF; width:150px;">{p1["NOM"]}</div>')).add_to(m)
+                        rep.append({"Salud": salud, "Zona": p1['NOM'], "Paquetes Actual": int(vol_act), "Pq Perdidos": round(pq_perdidos, 1), "Potencial Ideal": round(vol_act + pq_perdidos, 1), "% Traslape Real": f"{tr_total}%", "% Acumulado": f"{round(suma_acum, 1)}%", "Detalle": det_txt})
 
             mapa_html = m.get_root().render()
             components.html(mapa_html, height=550)
