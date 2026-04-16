@@ -22,6 +22,7 @@ def area_interseccion(r1, r2, d):
     return p1 + p2 - p3
 
 def calcular_traslape_real(p1, otros_pts):
+    """Muestreo de 3000 puntos para precisión quirúrgica."""
     if not otros_pts: return 0.0
     n = 3000 
     ang = np.random.uniform(0, 2*np.pi, n)
@@ -65,13 +66,21 @@ if status:
         st.title("🛡️ Panel AMZL")
         auth.logout('Cerrar Sesión', 'sidebar')
         modo = st.radio("Capa", ["Coordenadas", "Polígonos CP"])
+        gdf, col_cp_g, bounds_geo = None, None, None
         
-        # Botones de Plantilla Base
+        if "Polígonos" in modo:
+            archs = sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])
+            if archs:
+                edo_sel = st.selectbox("📍 Estado:", [f.replace('.geojson','').replace('_',' ') for f in archs])
+                idx = [f.replace('.geojson','').replace('_',' ') for f in archs].index(edo_sel)
+                gdf, col_cp_g = (gpd.read_file(f"mapas/{archs[idx]}").to_crs("EPSG:4326"), "id")
+                b = gdf.total_bounds
+                bounds_geo = [[b[1], b[0]], [b[3], b[2]]]
+
         st.subheader("📥 Plantillas")
         cols_base = {"Coordenadas": ["ZONA", "LATITUD", "LONGITUD", "RADIO", "VOLUMEN"], "Polígonos CP": ["ZONA", "CP", "VOLUMEN"]}
-        buf_p = io.BytesIO()
-        pd.DataFrame(columns=cols_base[modo]).to_excel(buf_p, index=False)
-        st.download_button(f"Descargar Base {modo}", data=buf_p.getvalue(), file_name=f"base_{modo.lower().replace(' ','_')}.xlsx", use_container_width=True)
+        pd.DataFrame(columns=cols_base[modo]).to_excel("base.xlsx", index=False)
+        st.download_button(f"Base {modo}", data=open("base.xlsx","rb"), file_name=f"base_{modo.lower().replace(' ','_')}.xlsx", use_container_width=True)
 
         xl_file = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
         if xl_file and st.button("🔄 Procesar"):
@@ -83,16 +92,11 @@ if status:
             sel = st.select_slider("🕒 Pestaña:", options=pestanas) if len(pestanas) > 1 else pestanas[0]
             df_act = st.session_state.dict_datos[sel].copy()
             st.write("---")
-            
-            # Filtro de Rangos de Volumen
-            st.subheader("📊 Filtros de Volumen")
             labs = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
-            cols = st.columns(3)
-            acts = [i for i, l in enumerate(labs) if cols[i%3].checkbox(l, value=True, key=f"r{i}{sel}")]
-            
+            cols = st.columns(3); acts = [i for i, l in enumerate(labs) if cols[i%3].checkbox(l, value=True, key=f"r{i}{sel}")]
             ver_n = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             m_ana = st.toggle("🔍 Tabla de Análisis", value=False)
-            if m_ana: f_estatus = st.multiselect("Salud Zona:", ["🟢 Sano", "🟡 Desviado", "🔴 Crítico"], default=["🟢 Sano", "🟡 Desviado", "🔴 Crítico"])
+            if m_ana: f_estatus = st.multiselect("Salud:", ["🟢 Sano", "🟡 Desviado", "🔴 Crítico"], default=["🟢 Sano", "🟡 Desviado", "🔴 Crítico"])
 
     # --- 3. LÓGICA DE MAPA ---
     with col_m:
@@ -103,42 +107,43 @@ if status:
             rep = []
 
             if 'LAT' in df_v.columns and 'LON' in df_v.columns:
-                pts = df_v[(df_v['LAT'] != 0) & (df_v['LON'] != 0)].to_dict('records')
-                for i, p1 in enumerate(pts):
-                    otros = [p for j, p in enumerate(pts) if i != j]
-                    ints = []
-                    for p2 in otros:
-                        dist = np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2) * 111139
-                        if dist < (p1['RAD'] + p2['RAD']):
-                            p_int = round((area_interseccion(p1['RAD'], p2['RAD'], dist) / (np.pi * p1['RAD']**2)) * 100, 1)
-                            if p_int > 0: ints.append({"nom": p2['NOM'], "porc": p_int})
-                    
-                    tr_real = round(calcular_traslape_real(p1, otros), 1)
-                    det_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in ints]) if ints else "No traslapado"
-                    suma_acum = sum([float(x) for x in re.findall(r"\((\d+\.?\d*)%\)", det_txt)])
-                    
-                    # Lógica de Unidades (Paquetes)
-                    vol_act = p1['VOL']
-                    paquetes_quitados = vol_act * (suma_acum / 100)
-                    vol_ideal = vol_act + paquetes_quitados
-                    
-                    salud = "🟢 Sano" if 30 <= vol_act <= 45 else "🟡 Desviado" if (20 <= vol_act < 30 or 45 < vol_act <= 55) else "🔴 Crítico"
-                    
-                    tip = f"<b>{p1['NOM']}</b><br>Paquetes Actuales: {int(vol_act)}<br>Paquetes Perdidos: {round(paquetes_quitados,1)}"
-                    folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, tooltip=tip).add_to(m)
-                    
-                    if ver_n:
-                        folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; text-shadow: 0 0 2px #FFF; width:150px;">{p1["NOM"]}</div>')).add_to(m)
-                    
-                    rep.append({
-                        "Salud": salud, 
-                        "Zona": p1['NOM'], 
-                        "Paquetes Actuales": int(vol_act), 
-                        "Paquetes que le Quitan": round(paquetes_quitados, 1),
-                        "Potencial Total (Paquetes)": round(vol_ideal, 1),
-                        "Acumulación Traslapes (%)": round(suma_acum, 1), 
-                        "Detalle Traslapes (%)": det_txt
-                    })
+                df_c = df_v[(df_v['LAT'] != 0) & (df_v['LON'] != 0)]
+                if not df_c.empty:
+                    # Centrado automático basado en las coordenadas ingresadas
+                    m.fit_bounds([[df_c['LAT'].min(), df_c['LON'].min()], [df_c['LAT'].max(), df_c['LON'].max()]])
+                    pts = df_c.to_dict('records')
+                    for i, p1 in enumerate(pts):
+                        otros = [p for j, p in enumerate(pts) if i != j]
+                        ints = []
+                        for p2 in otros:
+                            dist = np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2) * 111139
+                            if dist < (p1['RAD'] + p2['RAD']):
+                                p_int = round((area_interseccion(p1['RAD'], p2['RAD'], dist) / (np.pi * p1['RAD']**2)) * 100, 1)
+                                if p_int > 0: ints.append({"nom": p2['NOM'], "porc": p_int})
+                        
+                        # Porcentaje Total de Traslape (Área Real invadida)
+                        tr_total_area = round(calcular_traslape_real(p1, otros), 1)
+                        det_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in ints]) if ints else "No traslapado"
+                        suma_acum = sum([float(x) for x in re.findall(r"\((\d+\.?\d*)%\)", det_txt)])
+                        
+                        vol_act = p1['VOL']
+                        paquetes_quitados = vol_act * (suma_acum / 100)
+                        vol_ideal = vol_act + paquetes_quitados
+                        salud = "🟢 Sano" if 30 <= vol_act <= 45 else "🟡 Desviado" if (20 <= vol_act < 30 or 45 < vol_act <= 55) else "🔴 Crítico"
+                        
+                        # Tooltip con Paquetes o Traslape según análisis
+                        tip = f"<b>{p1['NOM']}</b><br>Paquetes Actual: {int(vol_act)}<br>Traslape Real: {tr_total_area}%" if m_ana else f"<b>{p1['NOM']}</b><br>Vol: {int(vol_act)}"
+                        folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, tooltip=tip).add_to(m)
+                        if ver_n: folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; text-shadow: 0 0 2px #FFF; width:150px;">{p1["NOM"]}</div>')).add_to(m)
+                        
+                        rep.append({
+                            "Salud": salud, "Zona": p1['NOM'], "Paquetes Actual": int(vol_act), 
+                            "Paquetes Perdidos (Unid)": round(paquetes_quitados, 1),
+                            "Vol. Ideal (Paquetes)": round(vol_ideal, 1),
+                            "% Traslape Total (Área)": f"{tr_total_area}%",
+                            "% Acumulado Traslapes": f"{round(suma_acum, 1)}%", 
+                            "Detalle Traslapes": det_txt
+                        })
 
             mapa_html = m.get_root().render()
             components.html(mapa_html, height=550)
@@ -147,8 +152,7 @@ if status:
             with c1: st.download_button("🗺️ Exportar Mapa HTML", data=mapa_html, file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
             with c2:
                 if rep:
-                    buf = io.BytesIO()
-                    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer: pd.DataFrame(rep).to_excel(writer, index=False)
+                    buf = io.BytesIO(); pd.DataFrame(rep).to_excel(buf, index=False)
                     st.download_button("📊 Exportar Excel", data=buf.getvalue(), file_name="analisis_amzl.xlsx", use_container_width=True)
             
             if m_ana and rep:
