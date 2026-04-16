@@ -161,4 +161,6 @@ with col_m:
 
         # RENDERIZADO FINAL CON CLAVE DINÁMICA
         with map_container:
-            st_folium(m, width="100%", height=550, key=f"mapa_{modo}_{sel}_{hash(tuple(acts))}")
+            # Cambia la línea del renderizado por esta:
+            st_folium(m, width=None, height=550, use_container_width=True, key="mapa_principal")
+
