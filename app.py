@@ -145,7 +145,7 @@ if status:
                             c = r['geometry'].centroid
                             folium.Marker([c.y, c.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-align:center; width:80px;">{n_dict[cp]}</div>')).add_to(m)
 
-            # B. LÓGICA PARA COORDENADAS (CON NUEVA REGLA DE TRASLAPE)
+            # B. LÓGICA PARA COORDENADAS
             if 'LAT' in df_v.columns and 'LON' in df_v.columns:
                 df_c = df_v[(df_v['LAT'] != 0) & (df_v['LON'] != 0)]
                 if not df_c.empty:
@@ -154,7 +154,6 @@ if status:
                     for i, p1 in enumerate(pts):
                         otros = [p for j, p in enumerate(pts) if i != j]
                         
-                        # Cálculo de intersecciones individuales
                         intersecciones = []
                         for p2 in otros:
                             dist = np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2) * 111139
@@ -165,7 +164,6 @@ if status:
                         
                         tr_real = calcular_traslape_real(p1, otros)
                         
-                        # Aplicación de tu lógica: si es solo 1, igualar valores
                         if len(intersecciones) == 1:
                             tr_final = intersecciones[0]['porc']
                             detalles_txt = f"{intersecciones[0]['nom']} ({intersecciones[0]['porc']}%)"
@@ -204,5 +202,4 @@ if status:
                 st.write("---")
                 st.dataframe(pd.DataFrame(rep), use_container_width=True, hide_index=True)
 
-# --- FIN DEL CÓDIGO ---
             
