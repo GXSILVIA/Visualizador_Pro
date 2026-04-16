@@ -189,4 +189,3 @@ if status:
                     df_rep = pd.DataFrame(rep)
                     st.table(df_rep[df_rep['Estatus'].isin(f_estatus)])
 
-**¿Deseas que los radios del mapa se oculten automáticamente si el volumen es 0 para limpiar la vista?**
