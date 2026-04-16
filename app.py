@@ -157,7 +157,9 @@ if status:
                         rep.append({"Estatus": "🔴" if tr_final > 50 else "🟡" if tr_final > 15 else "🟢", "Zona": p1['NOM'], "% Traslape Real": f"{tr_final}%", "Traslapado con": det_txt})
 
             # B. Renderizado y Descarga (SOLUCIÓN MAPA DOBLE)
-            st_folium(m, width="100%", height=550, key="mapa_estatico")
+            # Cambia esto al final de tu bloque de mapa:
+            st_folium(m, width="100%", height=550, key="mapa_fijo_amzl")
+
             
             c1, c2 = st.columns(2)
             with c1:
