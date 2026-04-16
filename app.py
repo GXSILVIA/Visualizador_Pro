@@ -176,28 +176,32 @@ if status:
                             "Traslapado con": detalles_txt
                         })
 
-            # C. RENDERIZADO Y BOTONES
+                        # C. RENDERIZADO Y BOTONES
             st_folium(m, width="100%", height=550, key="mapa_fijo", returned_objects=[])
+            
             c1, c2 = st.columns(2)
-with c1: # Eliminados los espacios sobrantes
-    # Usamos render() para obtener el HTML limpio del objeto mapa
-    html_mapa = m.get_root().render()
-    st.download_button(
-        "🗺️ Mapa HTML", 
-        data=html_mapa, 
-        file_name="mapa_amzl.html", 
-        mime="text/html", 
-        use_container_width=True
-    )
+            with c1:
+                # Para evitar el mapa doble, guardamos en un buffer de texto
+                import io
+                output = io.BytesIO()
+                m.save(output, close_file=False)
+                
+                st.download_button(
+                    "🗺️ Mapa HTML", 
+                    data=output.getvalue(), 
+                    file_name="mapa_amzl.html", 
+                    mime="text/html", 
+                    use_container_width=True
+                )
 
-with c2: # Agregado para que el segundo botón esté en la columna 2
-    st.download_button(
-        "📊 Informe Excel", 
-        data=buf.getvalue(), 
-        file_name="analisis.xlsx", 
-        use_container_width=True
-    )
-
-if m_ana and rep: 
-    st.write("---")
-    st.dataframe(pd.DataFrame(rep), use_container_width=True, hide_index=True)
+            with c2:
+                st.download_button(
+                    "📊 Informe Excel", 
+                    data=buf.getvalue(), 
+                    file_name="analisis.xlsx", 
+                    use_container_width=True
+                )
+            
+            if m_ana and rep: 
+                st.write("---")
+                st.dataframe(pd.DataFrame(rep), use_container_width=True, hide_index=True)
