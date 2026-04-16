@@ -100,7 +100,6 @@ if status:
         if xl_file and st.button("🔄 Procesar"):
             st.session_state.dict_datos = {p: normalizar(pd.ExcelFile(xl_file).parse(p), modo) for p in pd.ExcelFile(xl_file).sheet_names}
             st.rerun()
-
         if st.session_state.dict_datos:
             pestanas = list(st.session_state.dict_datos.keys())
             sel = st.select_slider("🕒 Pestaña:", options=pestanas) if len(pestanas) > 1 else pestanas[0]
@@ -112,18 +111,10 @@ if status:
             ver_n = st.toggle("🏷️ Ver Nombres Fijos", value=True)
             m_ana = st.toggle("🔍 Tabla de Análisis", value=False)
 
-            rep = []
-            if 'LAT' in df_v.columns and 'LON' in df_v.columns:
-                df_c = df_v[(df_v['LAT'] != 0) & (df_v['LON'] != 0)]
-                if not df_c.empty:
-                    if "Polígonos" not in modo: m.fit_bounds([df_c[['LAT','LON']].min().tolist(), df_c[['LAT','LON']].max().tolist()])
-                    pts = df_c.to_dict('records')
-                    for i, p1 in enumerate(pts):
-                        otros = [p for j, p in enumerate(pts) if i != j]
-                            # --- 3. MAPA ---
+    # --- 3. MAPA (EN COLUMNA IZQUIERDA) ---
     with col_m:
         if st.session_state.dict_datos:
-            # DEFINICIÓN DE VARIABLES (Asegura que df_v exista antes de usarlo)
+            # DEFINICIÓN DE VARIABLES
             df_v = df_act[df_act['R_ID'].isin(acts)].copy()
             m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             clrs = {0:"#FFF", 1:"#FF0", 2:"#FFA500", 3:"#F00", 4:"#FF4500", 5:"#800000"}
