@@ -162,10 +162,10 @@ if status:
 
             
             c1, c2 = st.columns(2)
-            with c1:
-                # El secreto para no duplicar es usar repr_html de un objeto limpio
-                st.download_button("🗺️ Mapa HTML", data=m._repr_html_(), file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
-            with c2:
+           with c1:
+    # Esta es la forma más limpia de exportar un solo mapa
+                 html_puro = m.get_root().render() 
+                 st.download_button("🗺️ Mapa HTML", data=html_puro, file_name="mapa_amzl.html", mime="text/html", use_container_width=True)            with c2:
                 if rep:
                     buf = io.BytesIO(); pd.DataFrame(rep).to_excel(buf, index=False)
                     st.download_button("📊 Informe Excel", data=buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
