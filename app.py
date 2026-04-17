@@ -136,9 +136,7 @@ if status:
                     ["🟢 Sano", "🟡 Sano (Bajo)", "🟠 Bajo", "🔴 Crítico"], 
                     default=["🟢 Sano", "🟡 Sano (Bajo)", "🟠 Bajo", "🔴 Crítico"]
                 )
-                )
-
-
+        
     # --- 3. LÓGICA DE MAPA ---
     with col_m:
         if st.session_state.df_datos is not None:
