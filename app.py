@@ -90,7 +90,7 @@ if status:
         st.title("🛡️ Panel ")
         auth.logout('Cerrar Sesión', 'sidebar')
         modo = st.radio("Capa", ["Coordenadas", "Polígonos CP"])
-        
+        m_ana = False
         gdf, col_cp_g, bounds_geo = None, None, None
         
         # --- FILTRO DE ESTADO (SOLO EN POLÍGONOS) ---
