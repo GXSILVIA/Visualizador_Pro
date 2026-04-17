@@ -9,30 +9,49 @@ import os, io, yaml, numpy as np, re
 from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
 import streamlit.components.v1 as components
+# Agregamos esta para el formato del Excel
+import xlsxwriter 
 
 # --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="Sistema Pro AMZL", layout="wide")
 
+@st.cache_data
 def area_interseccion(r1, r2, d):
     if d >= r1 + r2: return 0.0
     if d <= abs(r1 - r2): return np.pi * min(r1, r2)**2
+    # Cálculo de los sectores circulares y el área del triángulo (fórmula de Heron)
     p1 = r1**2 * np.arccos(np.clip((d**2 + r1**2 - r2**2) / (2 * d * r1), -1, 1))
     p2 = r2**2 * np.arccos(np.clip((d**2 + r2**2 - r1**2) / (2 * d * r2), -1, 1))
     p3 = 0.5 * np.sqrt(max(0, (-d + r1 + r2) * (d + r1 - r2) * (d - r1 + r2) * (d + r1 + r2)))
     return p1 + p2 - p3
 
+@st.cache_data
 def calcular_traslape_real(p1, otros_pts):
+    # Si no hay otros puntos, el traslape es 0
     if not otros_pts: return 0.0
-    n = 3000 
+    
+    n = 10000 
+    # Generación de puntos aleatorios dentro del círculo p1
     ang = np.random.uniform(0, 2*np.pi, n)
     rad = np.sqrt(np.random.uniform(0, 1, n)) * p1['RAD']
+    
     m_grado = 111139
+    cos_lat = np.cos(np.radians(p1['LAT']))
+    
+    # Proyección de puntos a coordenadas Lat/Lon
     p_lat = p1['LAT'] + ((rad * np.sin(ang)) / m_grado)
-    p_lon = p1['LON'] + ((rad * np.cos(ang)) / (m_grado * np.cos(np.radians(p1['LAT']))))
+    p_lon = p1['LON'] + ((rad * np.cos(ang)) / (m_grado * cos_lat))
+    
     cubiertos = np.zeros(n, dtype=bool)
+    
     for p2 in otros_pts:
-        d2 = ((p_lat - p2['LAT'])**2 + ((p_lon - p2['LON']) * np.cos(np.radians(p1['LAT'])))**2) * (m_grado**2)
+        # Cálculo de distancia cuadrada para evitar usar np.sqrt (más rápido)
+        d2 = ((p_lat - p2['LAT'])**2 + ((p_lon - p2['LON']) * cos_lat)**2) * (m_grado**2)
         cubiertos |= (d2 <= p2['RAD']**2)
+        
+        # Optimización: si ya cubrimos el 100%, no necesitamos seguir revisando otros puntos
+        if np.all(cubiertos): break 
+        
     return (np.sum(cubiertos) / n) * 100
 
 def obtener_rango_id(v, modo_p):
@@ -61,7 +80,7 @@ if status:
     col_m, col_p = st.columns([3, 1.3])
     
     with col_p:
-        st.title("🛡️ Panel AMZL")
+        st.title("🛡️ Panel ")
         auth.logout('Cerrar Sesión', 'sidebar')
         modo = st.radio("Capa", ["Coordenadas", "Polígonos CP"])
         
@@ -98,8 +117,13 @@ if status:
             labs = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
             cols = st.columns(3); acts = [i for i, l in enumerate(labs) if cols[i%3].checkbox(l, value=True, key=f"r{i}")]
             ver_n = st.toggle("🏷️ Ver Nombres Fijos", value=True)
-            m_ana = st.toggle("🔍 Tabla de Análisis", value=False)
-            if m_ana: f_estatus = st.multiselect("Salud:", ["🟢 Sano", "🟡 Desviado", "🔴 Crítico"], default=["🟢 Sano", "🟡 Desviado", "🔴 Crítico"])
+            if m_ana: 
+                f_estatus = st.multiselect(
+                    "Salud:", 
+                    ["🟢 Sano", "🟡 Medio", "🟠 Bajo", "🔴 Crítico", "⚪ Fuera de Rango"], 
+                    default=["🟢 Sano", "🟡 Medio", "🟠 Bajo", "🔴 Crítico"]
+                )
+
 
     # --- 3. LÓGICA DE MAPA ---
     with col_m:
@@ -139,30 +163,85 @@ if status:
                                 p_int = round((area_interseccion(p1['RAD'], p2['RAD'], dist) / (np.pi * p1['RAD']**2)) * 100, 1)
                                 if p_int > 0: ints.append({"nom": p2['NOM'], "porc": p_int})
                         
+                        # --- CÁLCULOS DE TRASLAPE Y PRORRATEO ---
                         tr_total = ints[0]['porc'] if len(ints) == 1 else round(calcular_traslape_real(p1, otros), 1)
                         det_txt = ", ".join([f"{n['nom']} ({n['porc']}%)" for n in ints]) if ints else "No traslapado"
                         suma_acum = sum([n['porc'] for n in ints])
                         vol_act = p1['VOL']
-                        pq_perdidos = vol_act * (suma_acum / 100)
-                        salud = "🟢 Sano" if 30 <= vol_act <= 45 else "🟡 Desviado" if (20 <= vol_act < 30 or 45 < vol_act <= 55) else "🔴 Crítico"
                         
+                        # Lógica de Prorrateo: Suma de la mitad del volumen de cada traslape individual
+                        pq_perdidos = round(sum([(vol_act * (n['porc'] / 100)) / 2 for n in ints]), 1)
+                        potencial_ideal = round(vol_act + pq_perdidos, 1)
+
+                        # --- RANGOS DE SALUD ACTUALIZADOS ---
+                        if 30 <= vol_act <= 50:
+                            salud = "🟢 Sano"
+                        elif 21 <= vol_act <= 29:
+                            salud = "🟡 Medio "
+                        elif 15 <= vol_act <= 20:
+                            salud = "🟠 Bajo"
+                        elif vol_act >= 51:
+                            salud = "🔴 Crítico"
+                        else:
+                            salud = "⚪ Fuera de Rango"
+                        
+                        # --- MAPA Y TOOLTIP ---
                         tip = f"<b>{p1['NOM']}</b><br>Pq Actual: {int(vol_act)}<br>Traslape Real: {tr_total}%" if m_ana else f"<b>{p1['NOM']}</b><br>Vol: {int(vol_act)}"
                         folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.35, tooltip=tip).add_to(m)
+                        
                         if ver_n:
                             folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:9pt; font-weight:bold; color:#000; text-shadow: 0 0 2px #FFF; width:150px;">{p1["NOM"]}</div>')).add_to(m)
-                        rep.append({"Salud": salud, "Zona": p1['NOM'], "Paquetes Actual": int(vol_act), "Pq Perdidos": round(pq_perdidos, 1), "Potencial Ideal": round(vol_act + pq_perdidos, 1), "% Traslape Real": f"{tr_total}%", "% Acumulado": f"{round(suma_acum, 1)}%", "Detalle": det_txt})
-
+                        
+                        # --- REPORTE FINAL ---
+                        rep.append({
+                            "Salud": salud, 
+                            "Zona": p1['NOM'], 
+                            "Paquetes Actual": int(vol_act), 
+                            "Pq Perdidos": pq_perdidos, 
+                            "Potencial Ideal": potencial_ideal, 
+                            "% Traslape Real": f"{tr_total}%", 
+                            "% Acumulado": f"{round(suma_acum, 1)}%", 
+                            "Detalle": det_txt
+                        })
+                        
             mapa_html = m.get_root().render()
             components.html(mapa_html, height=550)
-            
+
+                    # --- SECCIÓN DE EXPORTACIÓN ---
             c1, c2 = st.columns(2)
-            with c1: st.download_button("🗺️ Exportar Mapa HTML", data=mapa_html, file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
+            with c1: 
+                st.download_button("🗺️ Exportar Mapa HTML", data=mapa_html, file_name="mapa_amzl.html", mime="text/html", use_container_width=True)
+            
             with c2:
                 if rep:
-                    buf = io.BytesIO(); pd.DataFrame(rep).to_excel(buf, index=False)
-                    st.download_button("📊 Exportar Excel", data=buf.getvalue(), file_name="analisis.xlsx", use_container_width=True)
+                    # Crear el DataFrame del reporte
+                    df_export = pd.DataFrame(rep)
+                    
+                    # Reordenar columnas para que sea más legible en Excel
+                    columnas_ordenadas = [
+                        "Salud", "Zona", "Paquetes Actual", "Pq Perdidos", 
+                        "Potencial Ideal", "% Traslape Real", "% Acumulado", "Detalle"
+                    ]
+                    df_export = df_export[columnas_ordenadas]
+
+                    # Preparar el archivo Excel en memoria
+                    buf = io.BytesIO()
+                    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
+                        df_export.to_excel(writer, index=False, sheet_name='Analisis_Zonas')
+                        
+                        # Formato automático: Ajustar ancho de columnas
+                        worksheet = writer.sheets['Analisis_Zonas']
+                        for i, col in enumerate(df_export.columns):
+                            column_len = max(df_export[col].astype(str).str.len().max(), len(col)) + 2
+                            worksheet.set_column(i, i, column_len)
+
+                    st.download_button(
+                        label="📊 Exportar Análisis Excel", 
+                        data=buf.getvalue(), 
+                        file_name="analisis_amzl_prorrateo.xlsx", 
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+
             
-            if m_ana and rep:
-                st.write("---")
-                df_rep = pd.DataFrame(rep)
-                st.dataframe(df_rep[df_rep['Salud'].isin(f_estatus)], use_container_width=True, hide_index=True)
+           
