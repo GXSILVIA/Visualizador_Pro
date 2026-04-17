@@ -73,12 +73,19 @@ def normalizar(df, modo):
 # --- 2. SEGURIDAD Y PANEL ---
 with open('config.yaml') as f: config = yaml.load(f, SafeLoader)
 auth = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
-name, status, user = auth.login(location='main')
+# 1. Quitas la línea vieja y pones solo esta:
+auth.login(location='main')
 
+# 2. Obtienes los valores de la sesión (esto es lo nuevo):
+status = st.session_state.get("authentication_status")
+name = st.session_state.get("name")
+user = st.session_state.get("username")
+
+# 3. Lo demás se queda igual:
 if status:
     if 'df_datos' not in st.session_state: st.session_state.df_datos = None
     col_m, col_p = st.columns([3, 1.3])
-    
+   
     with col_p:
         st.title("🛡️ Panel ")
         auth.logout('Cerrar Sesión', 'sidebar')
