@@ -206,7 +206,7 @@ if status:
                         
                         # --- REPORTE FINAL ---
                         rep.append({
-                            "EDV": Salud, 
+                            "EDV": salud, 
                             "Zona": p1['NOM'], 
                             "Paquetes Actual": int(vol_act), 
                             "Pq Perdidos": pq_perdidos, 
