@@ -254,6 +254,21 @@ if status:
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
+                                # --- AGREGA ESTO PARA MOSTRAR LA TABLA EN PANTALLA ---
+            if m_ana and rep:
+                st.write("---")
+                st.subheader("📋 Tabla de Análisis de Salud y Traslapes")
+                
+                df_rep = pd.DataFrame(rep)
+                
+                # Filtramos por lo que seleccionaste en el multiselect (f_estatus)
+                df_filtrado = df_rep[df_rep['Salud'].isin(f_estatus)]
+                
+                if not df_filtrado.empty:
+                    st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("⚠️ No hay zonas que coincidan con los filtros de salud seleccionados.")
 
-            
+
+
            
