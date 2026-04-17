@@ -132,9 +132,9 @@ if status:
             # Ahora sí, el bloque que ya tenías funcionará:
             if m_ana: 
                 f_estatus = st.multiselect(
-                    "Salud:", 
-                    ["🟢 Sano", "🟡 Sano (Bajo)", "🟠 Bajo", "🔴 Crítico"], 
-                    default=["🟢 Sano", "🟡 Sano (Bajo)", "🟠 Bajo", "🔴 Crítico"]
+                    "EDV:", 
+                    ["🟢 Sano", "🟡 Medio", "🟠 Bajo", "🔴 Crítico"], 
+                    default=["🟢 Sano", "🟡 Medio", "🟠 Bajo", "🔴 Crítico"]
                 )
         
     # --- 3. LÓGICA DE MAPA ---
@@ -206,7 +206,7 @@ if status:
                         
                         # --- REPORTE FINAL ---
                         rep.append({
-                            "Salud": salud, 
+                            "EDV": EDV, 
                             "Zona": p1['NOM'], 
                             "Paquetes Actual": int(vol_act), 
                             "Pq Perdidos": pq_perdidos, 
@@ -231,7 +231,7 @@ if status:
                     
                     # Reordenar columnas para que sea más legible en Excel
                     columnas_ordenadas = [
-                        "Salud", "Zona", "Paquetes Actual", "Pq Perdidos", 
+                        "EDV", "Zona", "Paquetes Actual", "Pq Perdidos", 
                         "Potencial Ideal", "% Traslape Real", "% Acumulado", "Detalle"
                     ]
                     df_export = df_export[columnas_ordenadas]
@@ -262,12 +262,12 @@ if status:
                 df_rep = pd.DataFrame(rep)
                 
                 # Filtramos por lo que seleccionaste en el multiselect (f_estatus)
-                df_filtrado = df_rep[df_rep['Salud'].isin(f_estatus)]
+                df_filtrado = df_rep[df_rep['EDV'].isin(f_estatus)]
                 
                 if not df_filtrado.empty:
                     st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
                 else:
-                    st.warning("⚠️ No hay zonas que coincidan con los filtros de salud seleccionados.")
+                    st.warning("⚠️ No hay zonas que coincidan con los filtros de EDV seleccionados.")
 
 
 
