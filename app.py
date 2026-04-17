@@ -123,12 +123,19 @@ if status:
             # RANGOS SEGÚN MODO
             labs = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
             cols = st.columns(3); acts = [i for i, l in enumerate(labs) if cols[i%3].checkbox(l, value=True, key=f"r{i}")]
+            # ... (después de definir 'acts')
             ver_n = st.toggle("🏷️ Ver Nombres Fijos", value=True)
+            
+            # ESTA ES LA LÍNEA QUE FALTA:
+            m_ana = st.toggle("🔍 Tabla de Análisis", value=False)
+            
+            # Ahora sí, el bloque que ya tenías funcionará:
             if m_ana: 
                 f_estatus = st.multiselect(
                     "Salud:", 
-                    ["🟢 Sano", "🟡 Medio", "🟠 Bajo", "🔴 Crítico", "⚪ Fuera de Rango"], 
-                    default=["🟢 Sano", "🟡 Medio", "🟠 Bajo", "🔴 Crítico"]
+                    ["🟢 Sano", "🟡 Sano (Bajo)", "🟠 Bajo", "🔴 Crítico"], 
+                    default=["🟢 Sano", "🟡 Sano (Bajo)", "🟠 Bajo", "🔴 Crítico"]
+                )
                 )
 
 
