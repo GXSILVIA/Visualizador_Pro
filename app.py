@@ -189,7 +189,7 @@ if status:
                         if 30 <= vol_act <= 50:
                             salud = "🟢 Sano"
                         elif 21 <= vol_act <= 29:
-                            salud = "🟡 Medio "
+                            salud = "🟡 Medio"
                         elif 15 <= vol_act <= 20:
                             salud = "🟠 Bajo"
                         elif vol_act >= 51:
