@@ -1,5 +1,5 @@
 #-*- coding: utf-8 -*-
-# Copyright 2026 Silvia Guadalupe Garcia Espinosa - Sistema Pro AMZL v6.4
+# Copyright 2026 Silvia Guadalupe Garcia Espinosa - Sistema Pro AMZL v6.5 (Fix JSON Type)
 
 import streamlit as st
 import pandas as pd
@@ -18,11 +18,11 @@ st.set_page_config(page_title="Sistema Pro AMZL", layout="wide")
 @st.cache_data
 def area_interseccion(r1, r2, d):
     if d >= r1 + r2: return 0.0
-    if d <= abs(r1 - r2): return np.pi * min(r1, r2)**2
+    if d <= abs(r1 - r2): return float(np.pi * min(r1, r2)**2)
     p1 = r1**2 * np.arccos(np.clip((d**2 + r1**2 - r2**2) / (2 * d * r1), -1, 1))
     p2 = r2**2 * np.arccos(np.clip((d**2 + r2**2 - r1**2) / (2 * d * r2), -1, 1))
     p3 = 0.5 * np.sqrt(max(0, (-d + r1 + r2) * (d + r1 - r2) * (d - r1 + r2) * (d + r1 + r2)))
-    return p1 + p2 - p3
+    return float(p1 + p2 - p3)
 
 def calcular_traslape_real(p1, otros_pts):
     if not otros_pts: return 0.0
@@ -38,25 +38,25 @@ def calcular_traslape_real(p1, otros_pts):
         d2 = ((p_lat - p2['LAT'])**2 + ((p_lon - p2['LON']) * cos_lat)**2) * (m_grado**2)
         cubiertos |= (d2 <= p2['RAD']**2)
         if np.all(cubiertos): break 
-    return (np.sum(cubiertos) / n) * 100
+    return float((np.sum(cubiertos) / n) * 100)
 
 def obtener_rango_id(v, modo_p):
     lim = [100, 200, 300, 400] if modo_p else [15, 20, 30, 40]
-    return next((i for i, l in enumerate(lim, 1) if v <= l), 5) if v > 0 else 0
+    return int(next((i for i, l in enumerate(lim, 1) if v <= l), 5) if v > 0 else 0)
 
 def normalizar(df, modo):
     df.columns = df.columns.str.strip().str.upper()
     mapa = {'LAT':['LATITUD','LAT'],'LON':['LONGITUD','LON'],'VOL':['VOLUMEN','VOL'],'RAD':['RADIO','RAD'],'CP':['CP','C.P.'],'NOM':['NOMBRE','ZONA']}
     df = df.rename(columns={c: k for k, v in mapa.items() for c in df.columns if c in v})
     for c in ['LAT','LON','VOL','RAD']:
-        if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-    if 'RAD' not in df.columns or (df['RAD'] == 0).all(): df['RAD'] = 750
+        if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).astype(float)
+    if 'RAD' not in df.columns or (df['RAD'] == 0).all(): df['RAD'] = 750.0
     if 'CP' in df.columns: df['CP'] = df['CP'].astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(5)
     if 'NOM' not in df.columns: df['NOM'] = df.get('CP', 'ZONA')
     df['R_ID'] = df['VOL'].apply(lambda x: obtener_rango_id(x, "Polígonos" in modo))
     return df
 
-# --- 2. SEGURIDAD Y ESTADO ---
+# --- 2. SEGURIDAD ---
 with open('config.yaml') as f: config = yaml.load(f, SafeLoader)
 auth = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
 auth.login(location='main')
@@ -84,7 +84,7 @@ if st.session_state.get("authentication_status"):
                     gdf = gpd.read_file(f"mapas/{archs[[f.replace('.geojson','').replace('_',' ') for f in archs].index(edo_sel)]}").to_crs("EPSG:4326")
                     col_cp_g = next((c for c in ['d_cp','CP','CODIGOPOSTAL'] if c in gdf.columns), gdf.columns[0])
                     b = gdf.total_bounds
-                    bounds_geo = [[b[1], b[0]], [b[3], b[2]]]
+                    bounds_geo = [[float(b[1]), float(b[0])], [float(b[3]), float(b[2])]]
 
         xl_file = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
         if xl_file and st.button("🚀 PROCESAR"):
@@ -92,7 +92,7 @@ if st.session_state.get("authentication_status"):
                 xl = pd.ExcelFile(xl_file)
                 st.session_state.dict_hojas = {s: normalizar(xl.parse(s), modo) for s in xl.sheet_names}
                 st.session_state.analisis_cache = {}; st.session_state.historico_resumen = []
-                with st.spinner("Analizando histórico ejecutivo..."):
+                with st.spinner("Analizando histórico..."):
                     for i, (nombre, df_h) in enumerate(st.session_state.dict_hojas.items()):
                         pts = df_h.to_dict('records')
                         res = []
@@ -100,11 +100,11 @@ if st.session_state.get("authentication_status"):
                             otros = [p for j, p in enumerate(pts) if k != j]
                             tr = round(calcular_traslape_real(p1, otros), 1)
                             st_v = "🟢 Sano" if 30 <= p1['VOL'] <= 50 else "🟡 Medio" if 21 <= p1['VOL'] <= 29 else "🟠 Bajo" if 15 <= p1['VOL'] <= 20 else "🔴 Crítico" if p1['VOL'] >= 51 else "⚪ Fuera de Rango"
-                            res.append({"Mes": nombre, "ST": st_v, "Zona": p1['NOM'], "Traslape": tr, "R_ID": p1['R_ID']})
-                        prom_act = np.mean([r['Traslape'] for r in res])
-                        var = round(prom_act - st.session_state.historico_resumen[i-1]["Traslape_Prom"], 2) if i > 0 else 0
+                            res.append({"Mes": nombre, "ST": st_v, "Zona": p1['NOM'], "Traslape": tr, "R_ID": p1['R_ID'], "VOL": float(p1['VOL'])})
+                        prom_act = float(np.mean([r['Traslape'] for r in res]))
+                        var = round(prom_act - st.session_state.historico_resumen[i-1]["Traslape_Prom"], 2) if i > 0 else 0.0
                         st.session_state.analisis_cache[nombre] = res
-                        st.session_state.historico_resumen.append({"Mes": nombre, "Zonas": len(df_h), "Traslape_Prom": prom_act, "Variacion": var})
+                        st.session_state.historico_resumen.append({"Mes": nombre, "Zonas": int(len(df_h)), "Traslape_Prom": prom_act, "Variacion": var})
                 st.session_state.idx_hoja = 0
             else:
                 st.session_state.df_datos = normalizar(pd.read_excel(xl_file), modo)
@@ -116,9 +116,6 @@ if st.session_state.get("authentication_status"):
             if c1.button("⬅️ Anterior") and st.session_state.idx_hoja > 0: st.session_state.idx_hoja -= 1
             if c2.button("Siguiente ➡️") and st.session_state.idx_hoja < len(nh)-1: st.session_state.idx_hoja += 1
 
-        st.write("---")
-        labs = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
-        cols_f = st.columns(3); acts = [i for i, l in enumerate(labs) if cols_f[i%3].checkbox(l, value=True, key=f"r{i}_{modo}")]
         ver_n = st.toggle("🏷️ Ver Nombres", key="persist_nombres")
         m_ana = st.toggle("🔍 Análisis", key="persist_analisis")
 
@@ -136,9 +133,9 @@ if st.session_state.get("authentication_status"):
                 data_p = st.session_state.analisis_cache[hoja_act]; df_orig = st.session_state.dict_hojas[hoja_act]
                 for p_res in data_p:
                     p_c = df_orig[df_orig['NOM'] == p_res['Zona']].iloc[0]
-                    folium.Circle([p_c['LAT'], p_c['LON']], radius=p_c['RAD'], color=clrs[p_res['R_ID']], fill=True, fill_opacity=0.3, tooltip=f"{p_res['Zona']}: {p_res['Traslape']}%").add_to(m)
-                    if ver_n: folium.Marker([p_c['LAT'], p_c['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-shadow: 0 0 1px #FFF; width:100px;">{p_res["Zona"]}</div>')).add_to(m)
-                m.fit_bounds([[df_orig['LAT'].min(), df_orig['LON'].min()], [df_orig['LAT'].max(), df_orig['LON'].max()]])
+                    folium.Circle([float(p_c['LAT']), float(p_c['LON'])], radius=float(p_c['RAD']), color=clrs[p_res['R_ID']], fill=True, fill_opacity=0.3, tooltip=f"{p_res['Zona']}: {p_res['Traslape']}%").add_to(m)
+                    if ver_n: folium.Marker([float(p_c['LAT']), float(p_c['LON'])], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-shadow: 0 0 1px #FFF; width:100px;">{p_res["Zona"]}</div>')).add_to(m)
+                m.fit_bounds([[float(df_orig['LAT'].min()), float(df_orig['LON'].min())], [float(df_orig['LAT'].max()), float(df_orig['LON'].max())]])
             
             elif modo == "Polígonos CP" and gdf is not None:
                 df_v = st.session_state.df_datos.set_index('CP')
@@ -150,42 +147,39 @@ if st.session_state.get("authentication_status"):
                         folium.GeoJson(r['geometry'], style_function=lambda x, v=vol: {'fillColor':clrs[obtener_rango_id(v,True)], 'color':'#000', 'weight':1, 'fillOpacity':0.4}).add_to(m)
                         if ver_n:
                             c = r['geometry'].centroid
-                            folium.Marker([c.y, c.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-align:center; width:80px;">{nom}</div>')).add_to(m)
+                            folium.Marker([float(c.y), float(c.x)], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-align:center; width:80px;">{nom}</div>')).add_to(m)
             
-            else: # Coordenadas
-                df_v = st.session_state.df_datos[st.session_state.df_datos['R_ID'].isin(acts)]
+            else: # Capa Coordenadas Original
+                df_v = st.session_state.df_datos
                 pts = df_v.to_dict('records')
                 for i, p1 in enumerate(pts):
                     otros = [p for j, p in enumerate(pts) if i != j]
                     tr = round(calcular_traslape_real(p1, otros), 1)
-                    folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.3, tooltip=f"{p1['NOM']}: {tr}%").add_to(m)
-                    if ver_n: folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-shadow: 0 0 1px #FFF; width:100px;">{p1["NOM"]}</div>')).add_to(m)
+                    folium.Circle([float(p1['LAT']), float(p1['LON'])], radius=float(p1['RAD']), color=clrs[p1['R_ID']], fill=True, fill_opacity=0.3, tooltip=f"{p1['NOM']}: {tr}%").add_to(m)
+                    if ver_n: folium.Marker([float(p1['LAT']), float(p1['LON'])], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-shadow: 0 0 1px #FFF; width:100px;">{p1["NOM"]}</div>')).add_to(m)
+                    
                     dist_c = [np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2)*111139 for p2 in otros]
                     ints = [{"nom": otros[j]['NOM'], "porc": round((area_interseccion(p1['RAD'], otros[j]['RAD'], dist_c[j])/(np.pi*p1['RAD']**2))*100, 1)} for j in range(len(otros)) if dist_c[j] < (p1['RAD']+otros[j]['RAD'])]
                     st_v = "🟢 Sano" if 30 <= p1['VOL'] <= 50 else "🟡 Medio" if 21 <= p1['VOL'] <= 29 else "🟠 Bajo" if 15 <= p1['VOL'] <= 20 else "🔴 Crítico" if p1['VOL'] >= 51 else "⚪ Fuera de Rango"
                     rep.append({"ST": st_v, "Zona": p1['NOM'], "Paquetes": int(p1['VOL']), "Traslape Real": f"{tr}%", "Detalle": ", ".join([f"{n['nom']}({n['porc']}%)" for n in ints if n['porc']>0]) or "Sano"})
-                if not df_v.empty: m.fit_bounds([[df_v['LAT'].min(), df_v['LON'].min()], [df_v['LAT'].max(), df_v['LON'].max()]])
+                if not df_v.empty: m.fit_bounds([[float(df_v['LAT'].min()), float(df_v['LON'].min())], [float(df_v['LAT'].max()), float(df_v['LON'].max())]])
 
-            components.html(m.get_root().render(), height=500)
+            components.html(m.get_root().render(), height=550)
 
             if m_ana:
                 st.write("---")
                 if modo == "Crecimiento":
                     df_h = pd.DataFrame(st.session_state.historico_resumen)
-                    base = alt.Chart(df_h).encode(x=alt.X('Mes:O', title='Mes'))
-                    bar = base.mark_bar().encode(
-                        y=alt.Y('Zonas:Q', title='Cantidad de Zonas'),
-                        color=alt.condition(alt.datum.Traslape_Prom >= 80, alt.value('#d62728'), alt.value('#1f77b4')),
-                        tooltip=['Mes', 'Zonas', alt.Tooltip('Traslape_Prom', title='% Traslape', format='.2f'), alt.Tooltip('Variacion', title='Var vs Ant')]
-                    )
-                    line = base.mark_line(color='#ff7f0e', strokeWidth=3).encode(y=alt.Y('Traslape_Prom:Q', title='% Traslape'))
-                    st.altair_chart(alt.layer(bar, line).resolve_scale(y='independent').properties(height=250, title="Crecimiento vs Traslape (Interactiva)"), use_container_width=True)
+                    base = alt.Chart(df_h).encode(x='Mes:O')
+                    bar = base.mark_bar().encode(y='Zonas:Q', color=alt.condition(alt.datum.Traslape_Prom >= 80, alt.value('#d62728'), alt.value('#1f77b4')), tooltip=['Mes', 'Zonas', 'Traslape_Prom'])
+                    line = base.mark_line(color='#ff7f0e', strokeWidth=3).encode(y='Traslape_Prom:Q')
+                    st.altair_chart(alt.layer(bar, line).resolve_scale(y='independent').properties(height=250), use_container_width=True)
                     
-                    df_ex = pd.DataFrame(st.session_state.analisis_cache[hoja_act])
+                    df_ex = pd.DataFrame(st.session_state.analisis_cache[nh_all[st.session_state.idx_hoja]])
                     st.metric("📊 Traslape Promedio", f"{round(df_ex['Traslape'].mean(), 2)}%", delta=f"{st.session_state.historico_resumen[st.session_state.idx_hoja]['Variacion']}%", delta_color="inverse")
-                    df_ex['Traslape'] = df_ex['Traslape'].astype(str) + "%"
                     st.dataframe(df_ex[["Mes", "ST", "Zona", "Traslape"]].rename(columns={"Traslape":"% Traslape Real"}), use_container_width=True, hide_index=True)
                 elif modo == "Coordenadas":
+                    st.subheader("📋 Análisis de Paquetes y Traslapes")
                     st.dataframe(pd.DataFrame(rep), use_container_width=True, hide_index=True)
 
             c_d1, c_d2 = st.columns(2)
