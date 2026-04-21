@@ -1,5 +1,5 @@
 #-*- coding: utf-8 -*-
-# Copyright 2026 Silvia Guadalupe Garcia Espinosa - Sistema Pro AMZL v5.0 Total
+# Copyright 2026 Silvia Guadalupe Garcia Espinosa - Sistema Pro AMZL v5.1
 
 import streamlit as st
 import pandas as pd
@@ -56,7 +56,7 @@ def normalizar(df, modo):
     df['R_ID'] = df['VOL'].apply(lambda x: obtener_rango_id(x, "Polígonos" in modo))
     return df
 
-# --- 2. SEGURIDAD ---
+# --- 2. SEGURIDAD Y ESTADO ---
 with open('config.yaml') as f: config = yaml.load(f, SafeLoader)
 auth = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
 auth.login(location='main')
@@ -75,14 +75,13 @@ if st.session_state.get("authentication_status"):
         auth.logout('Cerrar Sesión', 'sidebar')
         modo = st.radio("Capa", ["Coordenadas", "Polígonos CP", "Crecimiento"])
         
-        # PERSISTENCIA GEOJSON
         gdf, col_cp_g, bounds_geo = None, None, None
         if modo == "Polígonos CP":
             archs = sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')]) if os.path.exists('mapas') else []
             if archs:
                 edo_sel = st.selectbox("📍 Estado:", [f.replace('.geojson','').replace('_',' ') for f in archs])
                 gdf = gpd.read_file(f"mapas/{archs[[f.replace('.geojson','').replace('_',' ') for f in archs].index(edo_sel)]}").to_crs("EPSG:4326")
-                col_cp_g = next((c for c in ['d_cp','CP','CODIGOPOSTAL'] if c in gdf.columns), gdf.columns[0])
+                col_cp_g = next((c for c in ['d_cp','CP','CODIGOPOSTAL'] if c in gdf.columns), gdf.columns)
                 b = gdf.total_bounds
                 bounds_geo = [[b[1], b[0]], [b[3], b[2]]]
 
@@ -92,7 +91,7 @@ if st.session_state.get("authentication_status"):
                 xl = pd.ExcelFile(xl_file)
                 st.session_state.dict_hojas = {s: normalizar(xl.parse(s), modo) for s in xl.sheet_names}
                 st.session_state.analisis_cache = {}; st.session_state.historico_meses = []
-                with st.spinner("Procesando histórico..."):
+                with st.spinner("Procesando histórico ejecutivo..."):
                     for nombre, df_h in st.session_state.dict_hojas.items():
                         pts = df_h.to_dict('records')
                         res = []
@@ -113,7 +112,7 @@ if st.session_state.get("authentication_status"):
             c1, c2 = st.columns(2)
             if c1.button("⬅️ Anterior") and st.session_state.idx_hoja > 0: st.session_state.idx_hoja -= 1
             if c2.button("Siguiente ➡️") and st.session_state.idx_hoja < len(nh)-1: st.session_state.idx_hoja += 1
-            st.info(f"Pestaña: **{nh[st.session_state.idx_hoja]}**")
+            st.info(f"Periodo: **{nh[st.session_state.idx_hoja]}**")
 
         st.write("---")
         labs = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
@@ -124,7 +123,7 @@ if st.session_state.get("authentication_status"):
     with col_m:
         hay_datos = (modo == "Crecimiento" and st.session_state.dict_hojas) or (modo != "Crecimiento" and st.session_state.df_datos is not None)
         if not hay_datos:
-            st.info("👋 Bienvenida. Carga un archivo para iniciar.")
+            st.info("👋 Bienvenida. Por favor, procesa un archivo para visualizar.")
         else:
             m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             clrs = {0:"#FFF", 1:"#FF0", 2:"#FFA500", 3:"#F00", 4:"#FF4500", 5:"#800000"}
@@ -159,11 +158,10 @@ if st.session_state.get("authentication_status"):
                     tr = round(calcular_traslape_real(p1, otros), 1)
                     folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.3, tooltip=f"{p1['NOM']}: {tr}%").add_to(m)
                     if ver_n: folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-shadow: 0 0 1px #FFF; width:100px;">{p1["NOM"]}</div>')).add_to(m)
-                    
                     dist_c = [np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2)*111139 for p2 in otros]
                     ints = [{"nom": otros[j]['NOM'], "porc": round((area_interseccion(p1['RAD'], otros[j]['RAD'], dist_c[j])/(np.pi*p1['RAD']**2))*100, 1)} for j in range(len(otros)) if dist_c[j] < (p1['RAD']+otros[j]['RAD'])]
                     st_v = "🟢 Sano" if 30 <= p1['VOL'] <= 50 else "🟡 Medio" if 21 <= p1['VOL'] <= 29 else "🟠 Bajo" if 15 <= p1['VOL'] <= 20 else "🔴 Crítico" if p1['VOL'] >= 51 else "⚪ Fuera de Rango"
-                    rep.append({"ST": st_v, "Zona": p1['NOM'], "Paquetes Actual": int(p1['VOL']), "Traslape Real": f"{tr}%", "Detalle": ", ".join([f"{n['nom']}({n['porc']}%)" for n in ints if n['porc']>0]) or "Sano"})
+                    rep.append({"ST": st_v, "Zona": p1['NOM'], "Paquetes": int(p1['VOL']), "Traslape Real": f"{tr}%", "Detalle": ", ".join([f"{n['nom']}({n['porc']}%)" for n in ints if n['porc']>0]) or "Sano"})
                 if not df_v.empty: m.fit_bounds([[df_v['LAT'].min(), df_v['LON'].min()], [df_v['LAT'].max(), df_v['LON'].max()]])
 
             components.html(m.get_root().render(), height=500)
@@ -173,9 +171,9 @@ if st.session_state.get("authentication_status"):
                 if modo == "Crecimiento":
                     df_h = pd.DataFrame(st.session_state.historico_meses)
                     fig = go.Figure()
-                    fig.add_trace(go.Bar(x=df_h['Mes'], y=df_h['Zonas'], name='Zonas', marker_color=['#d62728' if p > 50 else '#1f77b4' for p in df_h['Prom']]))
+                    fig.add_trace(go.Bar(x=df_h['Mes'], y=df_h['Zonas'], name='Zonas', marker_color=['#d62728' if p >= 80 else '#1f77b4' for p in df_h['Prom']]))
                     fig.add_trace(go.Scatter(x=df_h['Mes'], y=df_h['Prom'], name='% Traslape', yaxis='y2', line=dict(color='#ff7f0e', width=3)))
-                    fig.update_layout(yaxis2=dict(overlaying='y', side='right', range=), height=300)
+                    fig.update_layout(yaxis2=dict(overlaying='y', side='right', range=[0, 100]), height=300, margin=dict(t=20, b=20))
                     st.plotly_chart(fig, use_container_width=True)
                     
                     df_ex = pd.DataFrame(st.session_state.analisis_cache[nh_all[st.session_state.idx_hoja]])
@@ -184,6 +182,7 @@ if st.session_state.get("authentication_status"):
                     st.dataframe(df_ex[["Mes", "ST", "Zona", "Traslape"]].rename(columns={"Traslape":"% Traslape Real"}), use_container_width=True, hide_index=True)
                 
                 elif modo == "Coordenadas":
+                    st.subheader("📋 Análisis de Paquetes y Traslapes")
                     st.dataframe(pd.DataFrame(rep), use_container_width=True, hide_index=True)
 
             c_d1, c_d2 = st.columns(2)
@@ -196,5 +195,6 @@ if st.session_state.get("authentication_status"):
                             df_tmp = pd.DataFrame([r for r in st.session_state.analisis_cache[n_s]])
                             df_tmp['Traslape'] = df_tmp['Traslape'].astype(str) + "%"
                             df_tmp[["Mes", "Zona", "Traslape"]].to_excel(writer, sheet_name=f"Detalle_{n_s[:20]}", index=False)
+                        pd.DataFrame(st.session_state.historico_meses).to_excel(writer, sheet_name='INFORME_EJECUTIVO', index=False)
                     else: pd.DataFrame(rep).to_excel(writer, index=False, sheet_name='Analisis')
                 c_d2.download_button("📊 Excel", data=buf.getvalue(), file_name=f"informe_{modo}.xlsx", use_container_width=True)
