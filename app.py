@@ -1,5 +1,5 @@
 #-*- coding: utf-8 -*-
-# Copyright 2026 Silvia Guadalupe Garcia Espinosa - Sistema Pro Élite
+# Copyright 2026 Silvia Guadalupe Garcia Espinosa - Sistema Pro v2.0
 
 import streamlit as st
 import pandas as pd
@@ -56,22 +56,25 @@ def normalizar(df, modo):
     df['R_ID'] = df['VOL'].apply(lambda x: obtener_rango_id(x, "Polígonos" in modo))
     return df
 
-# --- 2. SEGURIDAD ---
+# --- 2. SEGURIDAD Y PERSISTENCIA ---
 with open('config.yaml') as f: config = yaml.load(f, SafeLoader)
 auth = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
 auth.login(location='main')
 
 if st.session_state.get("authentication_status"):
-    if 'df_datos' not in st.session_state: st.session_state.df_datos = None
-    if 'dict_hojas' not in st.session_state: st.session_state.dict_hojas = None
+    # Inicialización de estados para evitar que los botones se "olviden"
     if 'idx_hoja' not in st.session_state: st.session_state.idx_hoja = 0
+    if 'dict_hojas' not in st.session_state: st.session_state.dict_hojas = None
+    if 'df_datos' not in st.session_state: st.session_state.df_datos = None
 
     col_m, col_p = st.columns([3, 1.3])
+    
     with col_p:
         st.title("🛡️ Panel Pro")
         auth.logout('Cerrar Sesión', 'sidebar')
         modo = st.radio("Capa", ["Coordenadas", "Polígonos CP", "Crecimiento"])
         
+        # Lógica GeoJSON
         gdf, col_cp_g, bounds_geo = None, None, None
         if modo == "Polígonos CP":
             archs = sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')]) if os.path.exists('mapas') else []
@@ -94,45 +97,50 @@ if st.session_state.get("authentication_status"):
                 st.rerun()
 
         if modo == "Crecimiento" and st.session_state.dict_hojas:
-            nh = list(st.session_state.dict_hojas.keys())
-            st.info(f"Pestaña Actual: **{nh[st.session_state.idx_hoja]}**")
+            nh_list = list(st.session_state.dict_hojas.keys())
+            st.info(f"Pestaña Actual: **{nh_list[st.session_state.idx_hoja]}**")
             c1, c2 = st.columns(2)
             if c1.button("⬅️ Anterior") and st.session_state.idx_hoja > 0:
                 st.session_state.idx_hoja -= 1
                 st.rerun()
-            if c2.button("Siguiente ➡️") and st.session_state.idx_hoja < len(nh)-1:
+            if c2.button("Siguiente ➡️") and st.session_state.idx_hoja < len(nh_list)-1:
                 st.session_state.idx_hoja += 1
                 st.rerun()
 
         st.write("---")
         labs = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
         cols_f = st.columns(3); acts = [i for i, l in enumerate(labs) if cols_f[i%3].checkbox(l, value=True, key=f"r{i}_{modo}")]
-        ver_n = st.toggle("🏷️ Ver Nombres Fijos", value=False)
-        m_ana = st.toggle("🔍 Tabla de Análisis", value=False)
+        
+        # Botones persistentes
+        ver_n = st.toggle("🏷️ Ver Nombres Fijos", key="persist_nombres")
+        m_ana = st.toggle("🔍 Tabla de Análisis", key="persist_analisis")
+        
         if m_ana:
             f_estatus = st.multiselect("ST:", ["🟢 Sano", "🟡 Medio", "🟠 Bajo", "🔴 Crítico", "⚪ Fuera de Rango"], default=["🟢 Sano", "🟡 Medio", "🟠 Bajo", "🔴 Crítico"])
 
     with col_m:
         hay_datos = (modo == "Crecimiento" and st.session_state.dict_hojas) or (modo != "Crecimiento" and st.session_state.df_datos is not None)
         if not hay_datos:
-            st.info("👋 Bienvenida. Por favor, carga tu archivo Excel en el panel derecho.")
+            st.info("👋 Bienvenida. Por favor, carga tu archivo para iniciar.")
         else:
             m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             clrs = {0:"#FFF", 1:"#FF0", 2:"#FFA500", 3:"#F00", 4:"#FF4500", 5:"#800000"}
             rep = []
 
+            # --- RENDERIZADO ---
             if modo == "Crecimiento" and st.session_state.dict_hojas:
                 nh_all = list(st.session_state.dict_hojas.keys())
-                for idx, nom_p in enumerate(nh_all):
-                    fg = folium.FeatureGroup(name=nom_p, show=(idx == st.session_state.idx_hoja))
-                    df_h = st.session_state.dict_hojas[nom_p]
+                for idx, nom in enumerate(nh_all):
+                    fg = folium.FeatureGroup(name=nom, show=(idx == st.session_state.idx_hoja))
+                    df_h = st.session_state.dict_hojas[nom]
                     df_h_v = df_h[df_h['R_ID'].isin(acts)]
                     pts = df_h_v.to_dict('records')
                     for i, p1 in enumerate(pts):
                         otros = [p for j, p in enumerate(pts) if i != j]
                         tr = round(calcular_traslape_real(p1, otros), 1)
                         folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.3, tooltip=f"{p1['NOM']}: {tr}%").add_to(fg)
-                        if ver_n: folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-shadow: 0 0 1px #FFF; width:100px;">{p1["NOM"]}</div>')).add_to(fg)
+                        if ver_n:
+                            folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-shadow: 0 0 1px #FFF; width:100px;">{p1["NOM"]}</div>')).add_to(fg)
                         if idx == st.session_state.idx_hoja:
                             st_val = "🟢 Sano" if 30 <= p1['VOL'] <= 50 else "🟡 Medio" if 21 <= p1['VOL'] <= 29 else "🟠 Bajo" if 15 <= p1['VOL'] <= 20 else "🔴 Crítico" if p1['VOL'] >= 51 else "⚪ Fuera de Rango"
                             rep.append({"ST": st_val, "Zona": p1['NOM'], "Traslape": tr})
@@ -140,8 +148,9 @@ if st.session_state.get("authentication_status"):
                 folium.LayerControl(collapsed=False).add_to(m)
                 df_curr = st.session_state.dict_hojas[nh_all[st.session_state.idx_hoja]]
                 if not df_curr.empty: m.fit_bounds([[df_curr['LAT'].min(), df_curr['LON'].min()], [df_curr['LAT'].max(), df_curr['LON'].max()]])
-
+            
             elif st.session_state.df_datos is not None:
+                # Lógica normal Coordenadas/Polígonos
                 df_v = st.session_state.df_datos[st.session_state.df_datos['R_ID'].isin(acts)]
                 if modo == "Polígonos CP" and gdf is not None:
                     m.fit_bounds(bounds_geo)
@@ -158,29 +167,29 @@ if st.session_state.get("authentication_status"):
                     pts = df_v.to_dict('records')
                     for i, p1 in enumerate(pts):
                         otros = [p for j, p in enumerate(pts) if i != j]
-                        dist_calc = [np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2)*111139 for p2 in otros]
-                        ints = [{"nom": otros[j]['NOM'], "porc": round((area_interseccion(p1['RAD'], otros[j]['RAD'], dist_calc[j]) / (np.pi * p1['RAD']**2))*100, 1)} for j in range(len(otros)) if dist_calc[j] < (p1['RAD']+otros[j]['RAD'])]
+                        dist_c = [np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2)*111139 for p2 in otros]
+                        ints = [{"nom": otros[j]['NOM'], "porc": round((area_interseccion(p1['RAD'], otros[j]['RAD'], dist_c[j])/(np.pi*p1['RAD']**2))*100, 1)} for j in range(len(otros)) if dist_c[j] < (p1['RAD']+otros[j]['RAD'])]
                         tr = round(calcular_traslape_real(p1, otros), 1)
                         st_val = "🟢 Sano" if 30 <= p1['VOL'] <= 50 else "🟡 Medio" if 21 <= p1['VOL'] <= 29 else "🟠 Bajo" if 15 <= p1['VOL'] <= 20 else "🔴 Crítico" if p1['VOL'] >= 51 else "⚪ Fuera de Rango"
                         folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.3, tooltip=f"{p1['NOM']}: {tr}%").add_to(m)
                         if ver_n: folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-shadow: 0 0 1px #FFF; width:100px;">{p1["NOM"]}</div>')).add_to(m)
-                        pq_p = round(sum([(p1['VOL'] * (n['porc'] / 100)) / 2 for n in ints]), 1)
-                        rep.append({"ST": st_val, "Zona": p1['NOM'], "Paquetes Actual": int(p1['VOL']), "Pq Perdidos": pq_p, "Potencial Ideal": round(p1['VOL']+pq_p,1), "Traslape": tr, "Detalle": ", ".join([f"{n['nom']}({n['porc']}%)" for n in ints if n['porc']>0]) or "Sano"})
+                        pq_p = round(sum([(p1['VOL'] * (n['porc']/100))/2 for n in ints]), 1)
+                        rep.append({"ST": st_val, "Zona": p1['NOM'], "Paquetes Actual": int(p1['VOL']), "Pq Perdidos": pq_p, "Potencial Ideal": round(p1['VOL']+pq_p, 1), "Traslape": tr, "Detalle": ", ".join([f"{n['nom']}({n['porc']}%)" for n in ints if n['porc']>0]) or "Sano"})
                     if not df_v.empty: m.fit_bounds([[df_v['LAT'].min(), df_v['LON'].min()], [df_v['LAT'].max(), df_v['LON'].max()]])
 
             components.html(m.get_root().render(), height=550)
 
+            # --- ANÁLISIS ---
             if m_ana and rep:
                 st.write("---")
                 df_rep_f = pd.DataFrame(rep)
                 df_rep_f = df_rep_f[df_rep_f['ST'].isin(f_estatus)]
                 
-                # --- SEMÁFORO DE TRASLAPES (KPIs) ---
                 st.subheader("🚥 Semáforo Estratégico de Traslapes")
                 c_k1, c_k2, c_k3, c_k4 = st.columns(4)
-                with c_k1: st.metric("Bajo (0-15%)", len(df_rep_f[df_rep_f['Traslape'] <= 15]))
-                with c_k2: st.metric("Moderado (16-30%)", len(df_rep_f[(df_rep_f['Traslape'] > 15) & (df_rep_f['Traslape'] <= 30)]))
-                with c_k3: st.metric("Crítico (>30%)", len(df_rep_f[df_rep_f['Traslape'] > 30]))
+                with c_k1: st.metric("Bajo (0-20%)", len(df_rep_f[df_rep_f['Traslape'] <= 20]))
+                with c_k2: st.metric("Moderado (21-49%)", len(df_rep_f[(df_rep_f['Traslape'] > 20) & (df_rep_f['Traslape'] < 50)]))
+                with c_k3: st.metric("Crítico (≥50%)", len(df_rep_f[df_rep_f['Traslape'] >= 50]))
                 with c_k4: st.metric("Traslape Promedio", f"{round(df_rep_f['Traslape'].mean(), 2)}%")
                 
                 if modo == "Crecimiento":
@@ -188,8 +197,9 @@ if st.session_state.get("authentication_status"):
                 elif modo == "Coordenadas":
                     st.dataframe(df_rep_f, use_container_width=True, hide_index=True)
 
+            # --- EXPORTAR ---
             c_d1, c_d2 = st.columns(2)
-            c_d1.download_button("🗺️ Exportar Mapa HTML", data=m.get_root().render(), file_name=f"mapa_{modo}.html", use_container_width=True)
+            c_d1.download_button("🗺️ Mapa HTML", data=m.get_root().render(), file_name=f"mapa_{modo}.html", use_container_width=True)
             if modo != "Polígonos CP":
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
@@ -198,10 +208,10 @@ if st.session_state.get("authentication_status"):
                         for i, n_s in enumerate(list(st.session_state.dict_hojas.keys())):
                             df_h_d = st.session_state.dict_hojas[n_s]
                             pts_h_d = df_h_d.to_dict('records')
-                            tr_l = [calcular_traslape_real(px, [x for j, x in enumerate(pts_h_d) if k != j]) for k, px in enumerate(pts_h_d)]
-                            nuevas = len(set(df_h_d['NOM']) - set(st.session_state.dict_hojas[list(st.session_state.dict_hojas.keys())[i-1]]['NOM'])) if i > 0 else 0
+                            tr_l = [calcular_traslape_real(px, [x for j, x in enumerate(pts_h_d) if k != j]) for k, px in enumerate(pts_h_data if 'pts_h_data' in locals() else pts_h_d)]
                             pd.DataFrame({"Zona": [p['NOM'] for p in pts_h_d], "% Traslape": [f"{round(t,2)}%" for t in tr_l]}).to_excel(writer, sheet_name=f"Detalle_{n_s[:20]}", index=False)
-                            res_h.append({"Mes": n_s, "Zonas Nuevas": nuevas, "% Traslape Promedio": f"{round(np.mean(tr_l),2)}%", "Zonas Críticas (>30%)": len([t for t in tr_l if t > 30])})
+                            nuevas = len(set(df_h_d['NOM']) - set(st.session_state.dict_hojas[list(st.session_state.dict_hojas.keys())[i-1]]['NOM'])) if i > 0 else 0
+                            res_h.append({"Mes": n_s, "Zonas Nuevas": nuevas, "% Traslape Promedio": f"{round(np.mean(tr_l),2)}%"})
                         pd.DataFrame(res_h).to_excel(writer, sheet_name='INFORME_EJECUTIVO', index=False)
                     else: pd.DataFrame(rep).to_excel(writer, index=False, sheet_name='Analisis')
-                c_d2.download_button("📊 Exportar Informe Excel", data=buf.getvalue(), file_name=f"informe_{modo}.xlsx", use_container_width=True)
+                c_d2.download_button("📊 Excel", data=buf.getvalue(), file_name=f"informe_{modo}.xlsx", use_container_width=True)
