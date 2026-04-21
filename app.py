@@ -1,5 +1,5 @@
 #-*- coding: utf-8 -*-
-# Copyright 2026 Silvia Guadalupe Garcia Espinosa - Sistema Pro AMZL v7.9 (Interactive HTML Fix)
+# Copyright 2026 Silvia Guadalupe Garcia Espinosa - Sistema Pro AMZL v8.2 Fix Polygons
 
 import streamlit as st
 import pandas as pd
@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import xlsxwriter 
 import altair as alt
 
-# --- 1. CONFIGURACIÓN Y CÁLCULOS (PRECISIÓN 10,000) ---
+# --- 1. CONFIGURACIÓN Y CÁLCULOS ---
 st.set_page_config(page_title="Sistema Pro AMZL", layout="wide")
 
 @st.cache_data
@@ -46,17 +46,17 @@ def obtener_rango_id(v, modo_p):
 
 def normalizar(df, modo):
     df.columns = df.columns.str.strip().str.upper()
-    mapa = {'LAT':['LATITUD','LAT'],'LON':['LONGITUD','LON'],'VOL':['VOLUMEN','VOL'],'RAD':['RADIO','RAD'],'CP':['CP','C.P.'],'NOM':['NOMBRE','ZONA']}
+    mapa = {'LAT':['LATITUD','LAT'],'LON':['LONGITUD','LON'],'VOL':['VOLUMEN','VOL'],'RAD':['RADIO','RAD'],'CP':['CP','C.P.','CODIGOPOSTAL'],'NOM':['NOMBRE','ZONA']}
     df = df.rename(columns={c: k for k, v in mapa.items() for c in df.columns if c in v})
     for c in ['LAT','LON','VOL','RAD']:
         if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0).astype(float)
-    if 'RAD' not in df.columns or (df['RAD'] == 0).all(): df['RAD'] = 750.0
     if 'CP' in df.columns: df['CP'] = df['CP'].astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(5)
+    if 'RAD' not in df.columns or (df['RAD'] == 0).all(): df['RAD'] = 750.0
     if 'NOM' not in df.columns: df['NOM'] = df.get('CP', 'ZONA')
     df['R_ID'] = df['VOL'].apply(lambda x: obtener_rango_id(x, "Polígonos" in modo))
     return df
 
-# --- 2. SEGURIDAD Y ESTADOS ---
+# --- 2. SEGURIDAD ---
 with open('config.yaml') as f: config = yaml.load(f, SafeLoader)
 auth = stauth.Authenticate(config['credentials'], config['cookie']['name'], config['cookie']['key'], config['cookie']['expiry_days'])
 auth.login(location='main')
@@ -75,11 +75,18 @@ if st.session_state.get("authentication_status"):
         auth.logout('Cerrar Sesión', 'sidebar')
         modo = st.radio("Capa", ["Coordenadas", "Polígonos CP", "Crecimiento"])
         
-        st.subheader("📥 Plantillas")
-        cols_b = {"Coordenadas":["ZONA","LATITUD","LONGITUD","RADIO","VOLUMEN"],"Polígonos CP":["ZONA","CP","VOLUMEN"],"Crecimiento":["ZONA","LATITUD","LONGITUD","RADIO","VOLUMEN"]}
-        buf_p = io.BytesIO()
-        pd.DataFrame(columns=cols_b[modo]).to_excel(buf_p, index=False)
-        st.download_button(f"Base {modo}", data=buf_p.getvalue(), file_name=f"plantilla_{modo.lower().replace(' ','_')}.xlsx", use_container_width=True)
+        # Lógica de Polígonos (Selector de Estado)
+        gdf_pol, col_cp_geo, b_pol = None, None, None
+        if modo == "Polígonos CP":
+            if os.path.exists('mapas'):
+                archs = sorted([f for f in os.listdir('mapas') if f.endswith('.geojson')])
+                if archs:
+                    edo_sel = st.selectbox("📍 Estado:", [f.replace('.geojson','').replace('_',' ') for f in archs])
+                    idx_f = [f.replace('.geojson','').replace('_',' ') for f in archs].index(edo_sel)
+                    gdf_pol = gpd.read_file(f"mapas/{archs[idx_f]}").to_crs("EPSG:4326")
+                    col_cp_geo = next((c for c in ['d_cp','CP','CODIGOPOSTAL'] if c in gdf_pol.columns), gdf_pol.columns[0])
+                    b = gdf_pol.total_bounds
+                    b_pol = [[float(b[1]), float(b[0])], [float(b[3]), float(b[2])]]
 
         xl_file = st.file_uploader("📂 Cargar Excel", type=["xlsx"])
         if xl_file and st.button("🚀 PROCESAR"):
@@ -102,10 +109,10 @@ if st.session_state.get("authentication_status"):
             st.rerun()
 
         if modo == "Crecimiento" and st.session_state.dict_hojas:
-            nh_list = list(st.session_state.dict_hojas.keys())
+            nh = list(st.session_state.dict_hojas.keys())
             c1, c2 = st.columns(2)
             if c1.button("⬅️ Anterior") and st.session_state.idx_hoja > 0: st.session_state.idx_hoja -= 1
-            if c2.button("Siguiente ➡️") and st.session_state.idx_hoja < len(nh_list)-1: st.session_state.idx_hoja += 1
+            if c2.button("Siguiente ➡️") and st.session_state.idx_hoja < len(nh)-1: st.session_state.idx_hoja += 1
 
         st.write("---")
         labs = ["⚪ R0", "🟡 R1-100", "🟠 R101-200", "🔴 R201-300", "🏮 R301-400", "🍷 R401+"] if "Polígonos" in modo else ["⚪ R0", "🟡 R1-15", "🟠 R16-20", "🔴 R21-30", "🏮 R31-40", "🍷 R41+"]
@@ -115,88 +122,67 @@ if st.session_state.get("authentication_status"):
 
     with col_m:
         hay_d = (modo == "Crecimiento" and st.session_state.dict_hojas) or (modo != "Crecimiento" and st.session_state.df_datos is not None)
-        if not hay_d: st.info("👋 Por favor, procesa un archivo para visualizar.")
+        if not hay_d: st.info("👋 Por favor, procesa un archivo.")
         else:
             m = folium.Map(location=[19.4, -99.1], zoom_start=11, tiles="CartoDB Voyager")
             clrs = {0:"#FFF", 1:"#FF0", 2:"#FFA500", 3:"#F00", 4:"#FF4500", 5:"#800000"}
-            rep = []
+            rep_coords = []
 
             if modo == "Crecimiento":
-                nh_all = list(st.session_state.dict_hojas.keys())
-                for i_fg, nom_fg in enumerate(nh_all):
-                    # El mapa descargado tendrá todas las capas seleccionables
-                    fg = folium.FeatureGroup(name=nom_fg, show=(i_fg == st.session_state.idx_hoja))
-                    data_fg = [r for r in st.session_state.analisis_cache[nom_fg] if r['R_ID'] in acts]
-                    for p in data_fg:
-                        folium.Circle([p['LAT'], p['LON']], radius=p['RAD'], color=clrs[p['R_ID']], fill=True, fill_opacity=0.3, tooltip=f"{p['Zona']}: {p['Traslape']}%").add_to(fg)
-                        if ver_n: folium.Marker([p['LAT'], p['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-shadow: 0 0 1px #FFF; width:100px;">{p["Zona"]}</div>')).add_to(fg)
-                    fg.add_to(m)
-                folium.LayerControl(position='topright', collapsed=False).add_to(m)
-                df_curr = st.session_state.dict_hojas[nh_all[st.session_state.idx_hoja]]
-                m.fit_bounds([[df_curr['LAT'].min(), df_curr['LON'].min()], [df_curr['LAT'].max(), df_curr['LON'].max()]])
+                nh_all = list(st.session_state.dict_hojas.keys()); hoja_act = nh_all[st.session_state.idx_hoja]
+                data_p = [r for r in st.session_state.analisis_cache[hoja_act] if r['R_ID'] in acts]
+                for p in data_p:
+                    folium.Circle([p['LAT'], p['LON']], radius=p['RAD'], color=clrs[p['R_ID']], fill=True, fill_opacity=0.3, tooltip=f"{p['Zona']}: {p['Traslape']}%").add_to(m)
+                    if ver_n: folium.Marker([p['LAT'], p['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-shadow: 0 0 1px #FFF; width:100px;">{p["Zona"]}</div>')).add_to(m)
+                if data_p: m.fit_bounds([[min(r['LAT'] for r in data_p), min(r['LON'] for r in data_p)], [max(r['LAT'] for r in data_p), max(r['LON'] for r in data_p)]])
             
-            else: # Lógica para Coordenadas/Polígonos normal
+            elif modo == "Polígonos CP" and gdf_pol is not None:
+                df_pol_v = st.session_state.df_datos[st.session_state.df_datos['R_ID'].isin(acts)].set_index('CP')
+                for _, r in gdf_pol.iterrows():
+                    cp_geo = str(r[col_cp_geo]).zfill(5)
+                    if cp_geo in df_pol_v.index:
+                        vol_p = df_pol_v.loc[cp_geo, 'VOL']
+                        nom_p = df_pol_v.loc[cp_geo, 'NOM']
+                        folium.GeoJson(r['geometry'], style_function=lambda x, v=vol_p: {'fillColor':clrs[obtener_rango_id(v,True)], 'color':'#000', 'weight':1, 'fillOpacity':0.4}, tooltip=f"CP: {cp_geo} | {nom_p}").add_to(m)
+                        if ver_n:
+                            c = r['geometry'].centroid
+                            folium.Marker([c.y, c.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-align:center; width:80px;">{nom_p}</div>')).add_to(m)
+                m.fit_bounds(b_pol)
+            
+            else: # Coordenadas
                 df_v = st.session_state.df_datos[st.session_state.df_datos['R_ID'].isin(acts)]
                 pts = df_v.to_dict('records')
                 for i, p1 in enumerate(pts):
                     tr = round(calcular_traslape_real(p1, [p for j, p in enumerate(pts) if i != j]), 1)
-                    folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.3).add_to(m)
+                    folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.3, tooltip=f"{p1['NOM']}: {tr}%").add_to(m)
                     if ver_n: folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-shadow: 0 0 1px #FFF; width:100px;">{p1["NOM"]}</div>')).add_to(m)
-                    rep.append({"ST": "🟢 Sano" if tr <= 25 else "🟡 Medio", "ZONA": p1['NOM'], "% TRANSLAPE REAL": f"{tr}%"})
+                    rep_coords.append({"ST": "🟢 Bajo" if tr <= 25 else "🔴 Crítico", "ZONA": p1['NOM'], "VOLUMEN": int(p1['VOL']), "% TRANSLAPE REAL": f"{tr}%"})
                 if not df_v.empty: m.fit_bounds([[df_v['LAT'].min(), df_v['LON'].min()], [df_v['LAT'].max(), df_v['LON'].max()]])
 
-            map_html = m.get_root().render()
-            components.html(map_html, height=450)
+            components.html(m.get_root().render(), height=450)
 
-            if m_ana and modo == "Crecimiento":
+            if m_ana:
                 st.write("---")
-                df_h = pd.DataFrame(st.session_state.historico_resumen)
-                chart = alt.layer(
-                    alt.Chart(df_h).mark_bar().encode(x=alt.X('Mes:O', sort=alt.SortField('idx')), y='Zonas:Q', color=alt.value('#1f77b4')),
-                    alt.Chart(df_h).mark_line(color='#ff7f0e', size=3).encode(x=alt.X('Mes:O', sort=alt.SortField('idx')), y='Prom:Q')
-                ).resolve_scale(y='independent').properties(height=200)
-                st.altair_chart(chart, use_container_width=True)
-
-                hoja_act = nh_all[st.session_state.idx_hoja]
-                tot_z = st.session_state.historico_resumen[st.session_state.idx_hoja]['Zonas']
-                st.markdown(f"<h1 style='text-align: center; color: #ff4b4b;'>{hoja_act} ({tot_z} Zonas)</h1>", unsafe_allow_html=True)
-
-                df_ex = pd.DataFrame(st.session_state.analisis_cache[hoja_act])
-                p_act = st.session_state.historico_resumen[st.session_state.idx_hoja]['Prom']
-                delta_h = ""
-                if st.session_state.idx_hoja > 0:
-                    dif = p_act - st.session_state.historico_resumen[st.session_state.idx_hoja-1]['Prom']
-                    c_d, s_d = ("#dc3545", "▲") if dif > 0 else ("#28a745", "▼")
-                    delta_h = f"<p style='color:{c_d}; font-size:14px; font-weight:bold; margin:0;'>{s_d} {abs(round(dif,1))}% vs mes ant.</p>"
-
-                b, m_v, a, c = len(df_ex[df_ex['Traslape'] <= 25]), len(df_ex[(df_ex['Traslape'] > 25) & (df_ex['Traslape'] <= 50)]), len(df_ex[(df_ex['Traslape'] > 50) & (df_ex['Traslape'] <= 75)]), len(df_ex[df_ex['Traslape'] > 75])
-                t_e = len(df_ex) if len(df_ex) > 0 else 1
-                st.markdown(f"""
-                <div style="display: flex; justify-content: space-around; background: #1e1e1e; padding: 15px; border-radius: 10px; border: 1px solid #444; text-align: center;">
-                    <div><p style="color: #bbb; margin:0;">📊 Promedio</p><h2 style="margin:0;">{round(p_act,1)}%</h2>{delta_h}</div>
-                    <div><p style="color: #28a745; font-weight: bold; margin:0;">🟢 Bajo (0-25%)</p><h2 style="margin:0; color: #28a745;">{round(b/t_e*100,1)}%</h2><p style="color:#28a745; margin:0;">{b} zonas</p></div>
-                    <div><p style="color: #ffc107; font-weight: bold; margin:0;">🟡 Medio (26-50%)</p><h2 style="margin:0; color: #ffc107;">{round(m_v/t_e*100,1)}%</h2><p style="color:#ffc107; margin:0;">{m_v} zonas</p></div>
-                    <div><p style="color: #fd7e14; font-weight: bold; margin:0;">🟠 Alto (51-75%)</p><h2 style="margin:0; color: #fd7e14;">{round(a/t_e*100,1)}%</h2><p style="color:#fd7e14; margin:0;">{a} zonas</p></div>
-                    <div><p style="color: #dc3545; font-weight: bold; margin:0;">🔴 Crítico (>75%)</p><h2 style="margin:0; color: #dc3545;">{round(c/t_e*100,1)}%</h2><p style="color:#dc3545; margin:0;">{c} zonas</p></div>
-                </div>
-                """, unsafe_allow_html=True)
-                df_t = df_ex[["ST", "Zona", "Traslape"]].copy()
-                df_t["Traslape"] = df_t["Traslape"].astype(str) + "%"
-                st.dataframe(df_t.rename(columns={"Zona":"ZONA", "Traslape":"% TRANSLAPE REAL"}), use_container_width=True, hide_index=True)
-            elif m_ana and modo == "Coordenadas":
-                st.subheader("📋 Análisis Capa Coordenadas")
-                st.dataframe(pd.DataFrame(rep), use_container_width=True, hide_index=True)
+                if modo == "Crecimiento":
+                    df_h = pd.DataFrame(st.session_state.historico_resumen)
+                    chart = alt.layer(
+                        alt.Chart(df_h).mark_bar().encode(x=alt.X('Mes:O', sort=alt.SortField('idx')), y='Zonas:Q', color=alt.value('#1f77b4')),
+                        alt.Chart(df_h).mark_line(color='#ff7f0e', size=3).encode(x=alt.X('Mes:O', sort=alt.SortField('idx')), y='Prom:Q')
+                    ).resolve_scale(y='independent').properties(height=200)
+                    st.altair_chart(chart, use_container_width=True)
+                    st.markdown(f"<h1 style='text-align: center; color: #ff4b4b;'>{nh_all[st.session_state.idx_hoja]}</h1>", unsafe_allow_html=True)
+                    df_ex = pd.DataFrame(st.session_state.analisis_cache[nh_all[st.session_state.idx_hoja]])
+                    st.dataframe(df_ex[["ST", "Zona", "Traslape"]].rename(columns={"Traslape":"% TRANSLAPE REAL"}), use_container_width=True, hide_index=True)
+                elif modo == "Coordenadas":
+                    st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
             c1, c2 = st.columns(2)
-            c1.download_button("🗺️ Mapa HTML Interactivo", data=map_html, file_name=f"mapa_interactivo_{modo.lower()}.html", use_container_width=True)
+            c1.download_button("🗺️ Mapa HTML", data=m.get_root().render(), file_name=f"mapa_{modo.lower()}.html", use_container_width=True)
             if modo != "Polígonos CP":
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
                     if modo == "Crecimiento":
                         pd.DataFrame(st.session_state.historico_resumen).to_excel(wr, sheet_name='EJECUTIVO', index=False)
-                        for ns in st.session_state.dict_hojas.keys():
-                            df_tmp = pd.DataFrame(st.session_state.analisis_cache[ns])
-                            df_tmp["% TRANSLAPE"] = df_tmp["Traslape"].astype(str) + "%"
-                            df_tmp[["ST","Zona","% TRANSLAPE"]].to_excel(wr, sheet_name=ns[:25], index=False)
-                    else: pd.DataFrame(rep).to_excel(wr, index=False)
-                c2.download_button("📊 Informe Excel", data=buf.getvalue(), file_name=f"informe_{modo.lower()}.xlsx", use_container_width=True)
+                    else: pd.DataFrame(rep_coords).to_excel(wr, index=False)
+                c2.download_button("📊 Excel", data=buf.getvalue(), file_name=f"informe_{modo.lower()}.xlsx", use_container_width=True)
+
