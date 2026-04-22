@@ -205,8 +205,8 @@ if st.session_state.get("authentication_status"):
                         <div><p style="color: #fd7e14; font-weight: bold; margin:0;">🟠 Alto (51-75%)</p><h2 style="margin:0; color: #fd7e14;">{round(a/t_e*100,1)}%</h2><p style="color:#fd7e14; margin:0;">{a} zonas</p></div>
                         <div><p style="color: #dc3545; font-weight: bold; margin:0;">🔴 Crítico (>75%)</p><h2 style="margin:0; color: #dc3545;">{round(c/t_e*100,1)}%</h2><p style="color:#dc3545; margin:0;">{c} zonas</p></div>
                     </div>""", unsafe_allow_html=True)
-                    df_t = df_ex[["ST", "Zona", "Traslape"]].copy(); df_t["Traslape"] = df_t["Traslape"].astype(str) + "%"
-                    st.dataframe(df_t.rename(columns={"Zona":"ZONA", "Traslape":"% TRANSLAPE REAL"}), use_container_width=True, hide_index=True)
+                    df_t = df_ex[["ST", "Zona", "Volumen", "Traslape"]].copy(); df_t["Traslape"] = df_t["Traslape"].astype(str) + "%"
+                    st.dataframe(df_t.rename(columns={"Zona":"ZONA", "Volumen":"VOLUMEN", "Traslape":"% TRANSLAPE REAL"}), use_container_width=True, hide_index=True)
                 elif modo == "Coordenadas": st.subheader("📋 Análisis Operativo"); st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
             c1, c2 = st.columns(2); c1.download_button("🗺️ Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower()}.html", use_container_width=True)
@@ -215,6 +215,11 @@ if st.session_state.get("authentication_status"):
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
                     if modo == "Crecimiento":
                         pd.DataFrame(st.session_state.historico_resumen).to_excel(wr, sheet_name='EJECUTIVO', index=False)
-                        for ns in st.session_state.dict_hojas.keys(): pd.DataFrame(st.session_state.analisis_cache[ns])[["ST","Zona","Traslape"]].to_excel(wr, sheet_name=ns[:25], index=False)
-                    else: pd.DataFrame(rep_coords).to_excel(wr, index=False)
+                        for ns in st.session_state.dict_hojas.keys():
+                            # Se agrega "VOL" a la lista de columnas para el Excel
+                            df_excel = pd.DataFrame(st.session_state.analisis_cache[ns])[["ST", "Zona", "VOL", "Traslape"]]
+                            df_excel.columns = ["ESTADO", "ZONA", "VOLUMEN", "% TRASLAPE"] # Opcional: nombres limpios
+                            df_excel.to_excel(wr, sheet_name=ns[:25], index=False)
+                    else: 
+                        pd.DataFrame(rep_coords).to_excel(wr, index=False)
                 c2.download_button("📊 Excel", data=buf.getvalue(), file_name=f"informe_{modo.lower()}.xlsx", use_container_width=True)
