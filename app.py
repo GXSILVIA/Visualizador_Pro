@@ -159,12 +159,32 @@ if st.session_state.get("authentication_status"):
                 for i, p1 in enumerate(pts):
                     otros = [p for j, p in enumerate(pts) if i != j]
                     tr_r = round(calcular_traslape_real(p1, otros), 1)
+                    vol_p = int(p1['VOL'])
+                    
+                    # --- LÓGICA DE ANÁLISIS CORREGIDA ---
+                    if (25 <= vol_p <= 35) or (tr_r < 50):
+                        st_v = "🟢 Sano"
+                    elif (tr_r >= 50) and (vol_p < 25):
+                        st_v = "🔴 Crítico"
+                    else:
+                        st_v = "🟡 Atención" # Para volúmenes > 35 con traslape > 50%
+                    
                     ints = [round((area_interseccion(p1['RAD'], p2['RAD'], np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2)*111139)/(np.pi*p1['RAD']**2))*100,1) for p2 in otros if np.sqrt((p1['LAT']-p2['LAT'])**2 + ((p1['LON']-p2['LON'])*np.cos(np.radians(p1['LAT'])))**2)*111139 < (p1['RAD']+p2['RAD'])]
                     folium.Circle([p1['LAT'], p1['LON']], radius=p1['RAD'], color=clrs[p1['R_ID']], fill=True, fill_opacity=0.3, tooltip=f"{p1['NOM']}: {tr_r}%").add_to(m)
-                    if ver_n: folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-shadow: 0 0 1px #FFF; width:100px;">{p1["NOM"]}</div>')).add_to(m)
-                    st_v = "🟢 Bajo" if tr_r <= 25 else "🔴 Crítico"
-                    rep_coords.append({"ST": st_v, "ZONA": p1['NOM'], "VOLUMEN": int(p1['VOL']), "TRANSLAPE REAL": f"{tr_r}%", "TRANSLAPE ACUMULADO": f"{round(sum(ints),1)}%"})
-                if not df_v.empty: m.fit_bounds([[df_v['LAT'].min(), df_v['LON'].min()], [df_v['LAT'].max(), df_v['LON'].max()]])
+                    
+                    if ver_n: 
+                        folium.Marker([p1['LAT'], p1['LON']], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-shadow: 0 0 1px #FFF; width:100px;">{p1["NOM"]}</div>')).add_to(m)
+                    
+                    rep_coords.append({
+                        "ST": st_v, 
+                        "ZONA": p1['NOM'], 
+                        "VOLUMEN": vol_p, 
+                        "TRANSLAPE REAL": f"{tr_r}%", 
+                        "TRANSLAPE ACUMULADO": f"{round(sum(ints),1)}%"
+                    })
+                
+                if not df_v.empty: 
+                    m.fit_bounds([[df_v['LAT'].min(), df_v['LON'].min()], [df_v['LAT'].max(), df_v['LON'].max()]])
 
             map_html = m.get_root().render(); components.html(map_html, height=450)
 
