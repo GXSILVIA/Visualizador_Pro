@@ -202,44 +202,43 @@ if st.session_state.get("authentication_status"):
 
             map_html = m.get_root().render(); components.html(map_html, height=450)
 
+            # --- CÁLCULOS SIEMPRE DISPONIBLES PARA EXCEL Y DASHBOARD ---
+            if modo == "Crecimiento":
+                hoja_act = nh_all[st.session_state.idx_hoja]
+                df_ex = pd.DataFrame(st.session_state.analisis_cache[hoja_act])
+                t_e = len(df_ex) or 1
+                b = len(df_ex[df_ex['Traslape'] <= 25])
+                m_v = len(df_ex[(df_ex['Traslape'] > 25) & (df_ex['Traslape'] <= 50)])
+                a = len(df_ex[(df_ex['Traslape'] > 50) & (df_ex['Traslape'] <= 75)])
+                c = len(df_ex[df_ex['Traslape'] > 75])
+
             if m_ana:
                 st.write("---")
                 if modo == "Crecimiento":
-                    # --- CÁLCULOS PARA DASHBOARD ---
-                    hoja_act = nh_all[st.session_state.idx_hoja]
-                    df_ex = pd.DataFrame(st.session_state.analisis_cache[hoja_act])
-                    t_e = len(df_ex) or 1
-                    b, m_v, a, c = len(df_ex[df_ex['Traslape'] <= 25]), len(df_ex[(df_ex['Traslape'] > 25) & (df_ex['Traslape'] <= 50)]), len(df_ex[(df_ex['Traslape'] > 50) & (df_ex['Traslape'] <= 75)]), len(df_ex[df_ex['Traslape'] > 75])
-                    
-                    # --- GRÁFICA DASHBOARD CON LÍNEA AMARILLA Y ETIQUETAS ---
+                    # --- GRÁFICA DASHBOARD ---
                     df_h = pd.DataFrame(st.session_state.historico_resumen)
-                    base = alt.Chart(df_h).encode(x=alt.X('Mes:O', sort=alt.SortField('idx'), title="Meses"))
-                    
-                    barras = base.mark_bar(color='#1f77b4', opacity=0.5).encode(y=alt.Y('Zonas:Q', title="Cantidad de Zonas"))
-                    
-                    linea = base.mark_line(color='#FFD700', size=4, point=True).encode(y=alt.Y('Prom:Q', title="Traslape Promedio (%)"))
-                    
+                    base = alt.Chart(df_h).encode(x=alt.X('Mes:O', sort=alt.SortField('idx')))
+                    barras = base.mark_bar(color='#1f77b4', opacity=0.5).encode(y=alt.Y('Zonas:Q'))
+                    linea = base.mark_line(color='#FFD700', size=4, point=True).encode(y=alt.Y('Prom:Q'))
                     etiquetas = linea.mark_text(align='center', baseline='bottom', dy=-12, color='white', fontWeight='bold').encode(text=alt.Text('Prom:Q', format='.1f'))
                     
-                    chart = alt.layer(barras, linea, etiquetas).resolve_scale(y='independent').properties(height=300, title=f"Evolución: {hoja_act}")
-                    st.altair_chart(chart, use_container_width=True)
+                    st.altair_chart(alt.layer(barras, linea, etiquetas).resolve_scale(y='independent').properties(height=300), use_container_width=True)
 
                     # --- INDICADORES VISUALES ---
                     st.markdown(f"""
                         <div style="display: flex; justify-content: space-around; background: #1e1e1e; padding: 15px; border-radius: 10px; border: 1px solid #444; text-align: center;">
-                            <div><p style="color: #28a745; font-weight: bold; margin:0;">🟢 Bajo</p><h2 style="margin:0; color: #28a745;">{round(b/t_e*100,1)}%</h2><p style="color:#28a745; margin:0; font-size:12px;">{b} zonas</p></div>
-                            <div><p style="color: #ffc107; font-weight: bold; margin:0;">🟡 Medio</p><h2 style="margin:0; color: #ffc107;">{round(m_v/t_e*100,1)}%</h2><p style="color:#ffc107; margin:0; font-size:12px;">{m_v} zonas</p></div>
-                            <div><p style="color: #fd7e14; font-weight: bold; margin:0;">🟠 Alto</p><h2 style="margin:0; color: #fd7e14;">{round(a/t_e*100,1)}%</h2><p style="color:#fd7e14; margin:0; font-size:12px;">{a} zonas</p></div>
-                            <div><p style="color: #dc3545; font-weight: bold; margin:0;">🔴 Crítico</p><h2 style="margin:0; color: #dc3545;">{round(c/t_e*100,1)}%</h2><p style="color:#dc3545; margin:0; font-size:12px;">{c} zonas</p></div>
+                            <div><p style="color: #28a745; font-weight: bold; margin:0;">🟢 Bajo</p><h2 style="margin:0; color: #28a745;">{round(b/t_e*100,1)}%</h2></div>
+                            <div><p style="color: #ffc107; font-weight: bold; margin:0;">🟡 Medio</p><h2 style="margin:0; color: #ffc107;">{round(m_v/t_e*100,1)}%</h2></div>
+                            <div><p style="color: #fd7e14; font-weight: bold; margin:0;">🟠 Alto</p><h2 style="margin:0; color: #fd7e14;">{round(a/t_e*100,1)}%</h2></div>
+                            <div><p style="color: #dc3545; font-weight: bold; margin:0;">🔴 Crítico</p><h2 style="margin:0; color: #dc3545;">{round(c/t_e*100,1)}%</h2></div>
                         </div><br>""", unsafe_allow_html=True)
                     
                     st.dataframe(df_ex[["ST", "Zona", "VOL", "Traslape"]].rename(columns={"Zona":"ZONA", "VOL":"VOLUMEN", "Traslape":"% TR"}), use_container_width=True, hide_index=True)
-
-                elif modo == "Coordenadas": 
+                elif modo == "Coordenadas":
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-            # --- SECCIÓN DE DESCARGAS ACTUALIZADA ---
+            # --- SECCIÓN DE DESCARGAS ---
             c1, c2 = st.columns(2)
             c1.download_button("🗺️ Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower()}.html", use_container_width=True)
             
@@ -247,7 +246,6 @@ if st.session_state.get("authentication_status"):
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
                     if modo == "Crecimiento":
-                        # Hoja de Porcentajes solicitada
                         df_pct = pd.DataFrame([
                             {"Rango": "Bajo (0-25%)", "Cantidad": b, "Porcentaje": f"{round(b/t_e*100,1)}%"},
                             {"Rango": "Medio (26-50%)", "Cantidad": m_v, "Porcentaje": f"{round(m_v/t_e*100,1)}%"},
