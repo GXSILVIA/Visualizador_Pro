@@ -146,11 +146,25 @@ if st.session_state.get("authentication_status"):
                 for _, r in gdf_pol.iterrows():
                     cp_g = str(r[col_cp_geo]).zfill(5)
                     if cp_g in df_p.index:
-                        row = df_p.loc[cp_g]; v_p = row['VOL'] if isinstance(row, pd.Series) else row.iloc[0]['VOL']
+                        row = df_p.loc[cp_g]
+                        v_p = row['VOL'] if isinstance(row, pd.Series) else row.iloc[0]['VOL']
                         n_p = row['NOM'] if isinstance(row, pd.Series) else row.iloc[0]['NOM']
-                        folium.GeoJson(r['geometry'], style_function=lambda x, v=v_p: {'fillColor':clrs[obtener_rango_id(v,True)], 'color':'#000', 'weight':1, 'fillOpacity':0.4}).add_to(m)
+                        
+                        # --- MODIFICACIÓN: SE AGREGA TOOLTIP ---
+                        folium.GeoJson(
+                            r['geometry'], 
+                            style_function=lambda x, v=v_p: {
+                                'fillColor':clrs[obtener_rango_id(v,True)], 
+                                'color':'#000', 
+                                'weight':1, 
+                                'fillOpacity':0.4
+                            },
+                            tooltip=f"Zona: {n_p} | Vol: {int(v_p)}"
+                        ).add_to(m)
+                        
                         if ver_n:
-                            c = r['geometry'].centroid; folium.Marker([c.y, c.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-align:center; width:80px;">{n_p}</div>')).add_to(m)
+                            c = r['geometry'].centroid
+                            folium.Marker([c.y, c.x], icon=folium.features.DivIcon(html=f'<div style="font-size:8pt; font-weight:bold; color:#000; text-align:center; width:80px;">{n_p}</div>')).add_to(m)
                 m.fit_bounds(b_pol)
 
             else: # Coordenadas
@@ -191,35 +205,57 @@ if st.session_state.get("authentication_status"):
             if m_ana:
                 st.write("---")
                 if modo == "Crecimiento":
+                    # --- CÁLCULOS PARA DASHBOARD ---
+                    hoja_act = nh_all[st.session_state.idx_hoja]
+                    df_ex = pd.DataFrame(st.session_state.analisis_cache[hoja_act])
+                    t_e = len(df_ex) or 1
+                    b, m_v, a, c = len(df_ex[df_ex['Traslape'] <= 25]), len(df_ex[(df_ex['Traslape'] > 25) & (df_ex['Traslape'] <= 50)]), len(df_ex[(df_ex['Traslape'] > 50) & (df_ex['Traslape'] <= 75)]), len(df_ex[df_ex['Traslape'] > 75])
+                    
+                    # --- GRÁFICA DASHBOARD CON LÍNEA AMARILLA Y ETIQUETAS ---
                     df_h = pd.DataFrame(st.session_state.historico_resumen)
-                    chart = alt.layer(alt.Chart(df_h).mark_bar().encode(x=alt.X('Mes:O', sort=alt.SortField('idx')), y='Zonas:Q', color=alt.value('#1f77b4')), alt.Chart(df_h).mark_line(color='#ff7f0e', size=3).encode(x=alt.X('Mes:O', sort=alt.SortField('idx')), y='Prom:Q')).resolve_scale(y='independent').properties(height=200)
+                    base = alt.Chart(df_h).encode(x=alt.X('Mes:O', sort=alt.SortField('idx'), title="Meses"))
+                    
+                    barras = base.mark_bar(color='#1f77b4', opacity=0.5).encode(y=alt.Y('Zonas:Q', title="Cantidad de Zonas"))
+                    
+                    linea = base.mark_line(color='#FFD700', size=4, point=True).encode(y=alt.Y('Prom:Q', title="Traslape Promedio (%)"))
+                    
+                    etiquetas = linea.mark_text(align='center', baseline='bottom', dy=-12, color='white', fontWeight='bold').encode(text=alt.Text('Prom:Q', format='.1f'))
+                    
+                    chart = alt.layer(barras, linea, etiquetas).resolve_scale(y='independent').properties(height=300, title=f"Evolución: {hoja_act}")
                     st.altair_chart(chart, use_container_width=True)
-                    hoja_act = nh_all[st.session_state.idx_hoja]; st.markdown(f"<h1 style='text-align: center; color: #ff4b4b;'>{hoja_act} ({len(df_c)} Zonas)</h1>", unsafe_allow_html=True)
-                    df_ex = pd.DataFrame(st.session_state.analisis_cache[hoja_act]); p_act = st.session_state.historico_resumen[st.session_state.idx_hoja]['Prom']
-                    delta_h = f"<p style='color:{('#dc3545' if (p_act - st.session_state.historico_resumen[st.session_state.idx_hoja-1]['Prom']) > 0 else '#28a745')}; font-size:14px; font-weight:bold; margin:0;'>{'▲' if (p_act - st.session_state.historico_resumen[st.session_state.idx_hoja-1]['Prom']) > 0 else '▼'} {abs(round(p_act - st.session_state.historico_resumen[st.session_state.idx_hoja-1]['Prom'],1))}% vs mes ant.</p>" if st.session_state.idx_hoja > 0 else ""
-                    b, m_v, a, c, t_e = len(df_ex[df_ex['Traslape'] <= 25]), len(df_ex[(df_ex['Traslape'] > 25) & (df_ex['Traslape'] <= 50)]), len(df_ex[(df_ex['Traslape'] > 50) & (df_ex['Traslape'] <= 75)]), len(df_ex[df_ex['Traslape'] > 75]), len(df_ex) or 1
-                    st.markdown(f"""<div style="display: flex; justify-content: space-around; background: #1e1e1e; padding: 15px; border-radius: 10px; border: 1px solid #444; text-align: center;">
-                        <div><p style="color: #bbb; margin:0;">📊 Promedio</p><h2 style="margin:0;">{round(p_act,1)}%</h2>{delta_h}</div>
-                        <div><p style="color: #28a745; font-weight: bold; margin:0;">🟢 Bajo (0-25%)</p><h2 style="margin:0; color: #28a745;">{round(b/t_e*100,1)}%</h2><p style="color:#28a745; margin:0;">{b} zonas</p></div>
-                        <div><p style="color: #ffc107; font-weight: bold; margin:0;">🟡 Medio (26-50%)</p><h2 style="margin:0; color: #ffc107;">{round(m_v/t_e*100,1)}%</h2><p style="color:#ffc107; margin:0;">{m_v} zonas</p></div>
-                        <div><p style="color: #fd7e14; font-weight: bold; margin:0;">🟠 Alto (51-75%)</p><h2 style="margin:0; color: #fd7e14;">{round(a/t_e*100,1)}%</h2><p style="color:#fd7e14; margin:0;">{a} zonas</p></div>
-                        <div><p style="color: #dc3545; font-weight: bold; margin:0;">🔴 Crítico (>75%)</p><h2 style="margin:0; color: #dc3545;">{round(c/t_e*100,1)}%</h2><p style="color:#dc3545; margin:0;">{c} zonas</p></div>
-                    </div>""", unsafe_allow_html=True)
-                    df_t = df_ex[["ST", "Zona", "VOL", "Traslape"]].copy(); df_t["Traslape"] = df_t["Traslape"].astype(str) + "%"
-                    st.dataframe(df_t.rename(columns={"Zona":"ZONA", "VOL":"VOLUMEN", "Traslape":"% TRANSLAPE REAL"}), use_container_width=True, hide_index=True)
-                elif modo == "Coordenadas": st.subheader("📋 Análisis Operativo"); st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-            c1, c2 = st.columns(2); c1.download_button("🗺️ Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower()}.html", use_container_width=True)
+                    # --- INDICADORES VISUALES ---
+                    st.markdown(f"""
+                        <div style="display: flex; justify-content: space-around; background: #1e1e1e; padding: 15px; border-radius: 10px; border: 1px solid #444; text-align: center;">
+                            <div><p style="color: #28a745; font-weight: bold; margin:0;">🟢 Bajo</p><h2 style="margin:0; color: #28a745;">{round(b/t_e*100,1)}%</h2><p style="color:#28a745; margin:0; font-size:12px;">{b} zonas</p></div>
+                            <div><p style="color: #ffc107; font-weight: bold; margin:0;">🟡 Medio</p><h2 style="margin:0; color: #ffc107;">{round(m_v/t_e*100,1)}%</h2><p style="color:#ffc107; margin:0; font-size:12px;">{m_v} zonas</p></div>
+                            <div><p style="color: #fd7e14; font-weight: bold; margin:0;">🟠 Alto</p><h2 style="margin:0; color: #fd7e14;">{round(a/t_e*100,1)}%</h2><p style="color:#fd7e14; margin:0; font-size:12px;">{a} zonas</p></div>
+                            <div><p style="color: #dc3545; font-weight: bold; margin:0;">🔴 Crítico</p><h2 style="margin:0; color: #dc3545;">{round(c/t_e*100,1)}%</h2><p style="color:#dc3545; margin:0; font-size:12px;">{c} zonas</p></div>
+                        </div><br>""", unsafe_allow_html=True)
+                    
+                    st.dataframe(df_ex[["ST", "Zona", "VOL", "Traslape"]].rename(columns={"Zona":"ZONA", "VOL":"VOLUMEN", "Traslape":"% TR"}), use_container_width=True, hide_index=True)
+
+                elif modo == "Coordenadas": 
+                    st.subheader("📋 Análisis Operativo")
+                    st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
+
+            # --- SECCIÓN DE DESCARGAS ACTUALIZADA ---
+            c1, c2 = st.columns(2)
+            c1.download_button("🗺️ Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower()}.html", use_container_width=True)
+            
             if modo != "Polígonos CP":
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
                     if modo == "Crecimiento":
-                        pd.DataFrame(st.session_state.historico_resumen).to_excel(wr, sheet_name='EJECUTIVO', index=False)
-                        for ns in st.session_state.dict_hojas.keys():
-                            # Se agrega "VOL" a la lista de columnas para el Excel
-                            df_excel = pd.DataFrame(st.session_state.analisis_cache[ns])[["ST", "Zona", "VOL", "Traslape"]]
-                            df_excel.columns = ["ESTADO", "ZONA", "VOL", "% TRASLAPE"] # Opcional: nombres limpios
-                            df_excel.to_excel(wr, sheet_name=ns[:25], index=False)
-                    else: 
+                        # Hoja de Porcentajes solicitada
+                        df_pct = pd.DataFrame([
+                            {"Rango": "Bajo (0-25%)", "Cantidad": b, "Porcentaje": f"{round(b/t_e*100,1)}%"},
+                            {"Rango": "Medio (26-50%)", "Cantidad": m_v, "Porcentaje": f"{round(m_v/t_e*100,1)}%"},
+                            {"Rango": "Alto (51-75%)", "Cantidad": a, "Porcentaje": f"{round(a/t_e*100,1)}%"},
+                            {"Rango": "Crítico (>75%)", "Cantidad": c, "Porcentaje": f"{round(c/t_e*100,1)}%"}
+                        ])
+                        df_pct.to_excel(wr, sheet_name="Resumen_Porcentajes", index=False)
+                        pd.DataFrame(st.session_state.analisis_cache[hoja_act]).to_excel(wr, sheet_name="Detalle_Zonas", index=False)
+                    else:
                         pd.DataFrame(rep_coords).to_excel(wr, index=False)
-                c2.download_button("📊 Excel", data=buf.getvalue(), file_name=f"informe_{modo.lower()}.xlsx", use_container_width=True)
+                c2.download_button("📊 Descargar Excel", data=buf.getvalue(), file_name=f"reporte_{modo.lower()}.xlsx", use_container_width=True)
