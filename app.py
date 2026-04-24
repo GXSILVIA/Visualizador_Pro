@@ -212,57 +212,45 @@ if st.session_state.get("authentication_status"):
                 a = len(df_ex[(df_ex['Traslape'] > 50) & (df_ex['Traslape'] <= 75)])
                 c = len(df_ex[df_ex['Traslape'] > 75])
 
+            # --- CÁLCULOS PREVIOS (SIEMPRE DISPONIBLES) ---
+            if modo == "Crecimiento":
+                idx_actual = st.session_state.idx_hoja
+                hoja_act = nh_all[idx_actual]
+                df_ex = pd.DataFrame(st.session_state.analisis_cache[hoja_act])
+                t_e = len(df_ex) or 1
+                b = len(df_ex[df_ex['Traslape'] <= 25])
+                m_v = len(df_ex[(df_ex['Traslape'] > 25) & (df_ex['Traslape'] <= 50)])
+                a = len(df_ex[(df_ex['Traslape'] > 50) & (df_ex['Traslape'] <= 75)])
+                c = len(df_ex[df_ex['Traslape'] > 75])
+                p_act = st.session_state.historico_resumen[idx_actual]['Prom']
+
             if m_ana:
                 st.write("---")
                 if modo == "Crecimiento":
-                    # --- CÁLCULOS COMPARATIVOS ---
-                    idx_actual = st.session_state.idx_hoja
-                    p_act = st.session_state.historico_resumen[idx_actual]['Prom']
-                    delta_html = ""
-                    if idx_actual > 0:
-                        p_ant = st.session_state.historico_resumen[idx_actual-1]['Prom']
-                        diff = round(p_act - p_ant, 1)
-                        color_d = "#dc3545" if diff > 0 else "#28a745"
-                        icon_d = "▲" if diff > 0 else "▼"
-                        delta_html = f"<p style='color:{color_d}; font-size:16px; margin:0;'>{icon_d} {abs(diff)}% vs mes ant.</p>"
-
-                    # --- TÍTULO DINÁMICO ---
-                    hoja_act = nh_all[idx_actual]
-                    st.markdown(f"<h2 style='text-align: center; color: #f0f2f6;'>{hoja_act} ({t_e} VRs)</h2>", unsafe_allow_html=True)
-
-                    # --- DASHBOARD DE GRÁFICA ---
+                    # --- TÍTULO Y DASHBOARD ---
+                    st.markdown(f"<h2 style='text-align: center;'>{hoja_act} ({t_e} VRs)</h2>", unsafe_allow_html=True)
+                    
                     df_h = pd.DataFrame(st.session_state.historico_resumen)
                     base = alt.Chart(df_h).encode(x=alt.X('Mes:O', sort=alt.SortField('idx'), title="Meses"))
                     barras = base.mark_bar(color='#1f77b4', opacity=0.4).encode(y=alt.Y('Zonas:Q', title="Total VRs"))
                     linea = base.mark_line(color='#FFD700', size=4, point=True).encode(y=alt.Y('Prom:Q', title="Traslape Total (%)"))
                     etiquetas = linea.mark_text(align='center', baseline='bottom', dy=-12, color='white', fontWeight='bold').encode(text=alt.Text('Prom:Q', format='.1f'))
-                    
                     st.altair_chart(alt.layer(barras, linea, etiquetas).resolve_scale(y='independent').properties(height=300), use_container_width=True)
 
-                    # --- INDICADORES CON DELTA Y CONTEO DE VRs ---
+                    # --- INDICADORES CON DELTA ---
+                    delta_html = ""
+                    if idx_actual > 0:
+                        diff = round(p_act - st.session_state.historico_resumen[idx_actual-1]['Prom'], 1)
+                        color_d, icon_d = ("#dc3545", "▲") if diff > 0 else ("#28a745", "▼")
+                        delta_html = f"<p style='color:{color_d}; font-size:15px; margin:0;'>{icon_d} {abs(diff)}% vs mes ant.</p>"
+
                     st.markdown(f"""
                         <div style="display: flex; justify-content: space-around; background: #1e1e1e; padding: 20px; border-radius: 12px; border: 1px solid #444; text-align: center;">
                             <div><p style="color: #bbb; margin:0;">📊 Traslape Total</p><h2 style="margin:0;">{round(p_act,1)}%</h2>{delta_html}</div>
-                            <div style="border-left: 1px solid #444; padding-left: 20px;">
-                                <p style="color: #28a745; font-weight: bold; margin:0;">🟢 Bajo</p>
-                                <h2 style="margin:0; color: #28a745;">{round(b/t_e*100,1)}%</h2>
-                                <p style="color:#28a745; margin:0;">{b} VRs</p>
-                            </div>
-                            <div>
-                                <p style="color: #ffc107; font-weight: bold; margin:0;">🟡 Medio</p>
-                                <h2 style="margin:0; color: #ffc107;">{round(m_v/t_e*100,1)}%</h2>
-                                <p style="color:#ffc107; margin:0;">{m_v} VRs</p>
-                            </div>
-                            <div>
-                                <p style="color: #fd7e14; font-weight: bold; margin:0;">🟠 Alto</p>
-                                <h2 style="margin:0; color: #fd7e14;">{round(a/t_e*100,1)}%</h2>
-                                <p style="color:#fd7e14; margin:0;">{a} VRs</p>
-                            </div>
-                            <div>
-                                <p style="color: #dc3545; font-weight: bold; margin:0;">🔴 Crítico</p>
-                                <h2 style="margin:0; color: #dc3545;">{round(c/t_e*100,1)}%</h2>
-                                <p style="color:#dc3545; margin:0;">{c} VRs</p>
-                            </div>
+                            <div style="border-left: 1px solid #444; padding-left: 20px;"><p style="color: #28a745; font-weight: bold; margin:0;">🟢 Bajo</p><h2 style="margin:0; color: #28a745;">{round(b/t_e*100,1)}%</h2><p style="color:#28a745; margin:0;">{b} VRs</p></div>
+                            <div><p style="color: #ffc107; font-weight: bold; margin:0;">🟡 Medio</p><h2 style="margin:0; color: #ffc107;">{round(m_v/t_e*100,1)}%</h2><p style="color:#ffc107; margin:0;">{m_v} VRs</p></div>
+                            <div><p style="color: #fd7e14; font-weight: bold; margin:0;">🟠 Alto</p><h2 style="margin:0; color: #fd7e14;">{round(a/t_e*100,1)}%</h2><p style="color:#fd7e14; margin:0;">{a} VRs</p></div>
+                            <div><p style="color: #dc3545; font-weight: bold; margin:0;">🔴 Crítico</p><h2 style="margin:0; color: #dc3545;">{round(c/t_e*100,1)}%</h2><p style="color:#dc3545; margin:0;">{c} VRs</p></div>
                         </div><br>""", unsafe_allow_html=True)
                     
                     st.dataframe(df_ex[["ST", "Zona", "VOL", "Traslape"]].rename(columns={"Zona":"VR", "VOL":"VOLUMEN", "Traslape":"% TR"}), use_container_width=True, hide_index=True)
@@ -271,7 +259,7 @@ if st.session_state.get("authentication_status"):
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-            # --- SECCIÓN DE DESCARGAS ---
+            # --- SECCIÓN DE DESCARGAS (REPORTE MAESTRO) ---
             c1, c2 = st.columns(2)
             c1.download_button("🗺️ Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower()}.html", use_container_width=True)
             
@@ -279,14 +267,25 @@ if st.session_state.get("authentication_status"):
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
                     if modo == "Crecimiento":
-                        df_pct = pd.DataFrame([
-                            {"Rango": "Bajo (0-25%)", "Cantidad_VRs": b, "Porcentaje": f"{round(b/t_e*100,1)}%"},
-                            {"Rango": "Medio (26-50%)", "Cantidad_VRs": m_v, "Porcentaje": f"{round(m_v/t_e*100,1)}%"},
-                            {"Rango": "Alto (51-75%)", "Cantidad_VRs": a, "Porcentaje": f"{round(a/t_e*100,1)}%"},
-                            {"Rango": "Crítico (>75%)", "Cantidad_VRs": c, "Porcentaje": f"{round(c/t_e*100,1)}%"}
-                        ])
-                        df_pct.to_excel(wr, sheet_name="Resumen_Porcentajes", index=False)
-                        pd.DataFrame(st.session_state.analisis_cache[hoja_act]).to_excel(wr, sheet_name="Detalle_Zonas", index=False)
+                        # 1. Resumen General de todas las pestañas
+                        resumen_global = []
+                        for h_res in st.session_state.historico_resumen:
+                            n_h = h_res['Mes']
+                            df_h_data = pd.DataFrame(st.session_state.analisis_cache[n_h])
+                            total_v = len(df_h_data) or 1
+                            resumen_global.append({
+                                "PESTAÑA": n_h, "TOTAL VRs": total_v, "TRASLAPE TOTAL": f"{round(h_res['Prom'], 1)}%",
+                                "BAJO": f"{round(len(df_h_data[df_h_data['Traslape'] <= 25])/total_v*100, 1)}%",
+                                "CRÍTICO": f"{round(len(df_h_data[df_h_data['Traslape'] > 75])/total_v*100, 1)}%"
+                            })
+                        pd.DataFrame(resumen_global).to_excel(wr, sheet_name="Resumen_General", index=False)
+
+                        # 2. Detalle de cada VR por cada pestaña
+                        for n_h in st.session_state.dict_hojas.keys():
+                            df_det = pd.DataFrame(st.session_state.analisis_cache[n_h])[["Zona", "VOL", "Traslape"]]
+                            df_det.rename(columns={"Zona": "VR", "VOL": "VOLUMEN", "Traslape": "TRASLAPE_%"}, inplace=True)
+                            df_det.to_excel(wr, sheet_name=n_h[:30], index=False)
                     else:
-                        pd.DataFrame(rep_coords).to_excel(wr, index=False)
-                c2.download_button("📊 Descargar Excel", data=buf.getvalue(), file_name=f"reporte_{modo.lower()}.xlsx", use_container_width=True)
+                        pd.DataFrame(rep_coords).to_excel(wr, sheet_name="Reporte", index=False)
+                
+                c2.download_button("📊 Descargar Excel Maestro", data=buf.getvalue(), file_name=f"reporte_pro_{modo.lower()}.xlsx", use_container_width=True)
