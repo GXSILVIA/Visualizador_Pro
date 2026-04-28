@@ -1,2 +1,2 @@
-# Visualizador_Pro
+# Visor_Pro
 Visualiza mapas generados desde archivos de excel
