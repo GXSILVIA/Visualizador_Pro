@@ -259,15 +259,22 @@ if st.session_state.get("authentication_status"):
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-            # --- SECCIÓN DE DESCARGAS (VERSIÓN PLATINUM UNIFICADA) ---
+            # --- SECCIÓN DE DESCARGAS (BOTONES ALINEADOS) ---
             from datetime import datetime
             import xlsxwriter.utility
 
+            # Creamos dos columnas con la misma proporción
             c1, c2 = st.columns(2)
-            c1.download_button("🗺️ Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower()}.html", use_container_width=True)
+            
+            # 1. BOTÓN DE MAPA (Lado Izquierdo)
+            c1.download_button(
+                label="🗺️ Descargar Mapa HTML", 
+                data=map_html, 
+                file_name=f"mapa_{modo.lower()}.html", 
+                use_container_width=True
+            )
             
             if modo != "Polígonos CP":
-                # Configuración de nombre de archivo con fecha actual
                 fecha_hoy = datetime.now().strftime("%d_%m_%Y")
                 nombre_archivo = f"Reporte_{fecha_hoy}.xlsx"
                 
@@ -275,19 +282,15 @@ if st.session_state.get("authentication_status"):
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
                     wb = wr.book
                     
-                    # --- DICCIONARIO DE FORMATOS EJECUTIVOS ---
+                    # --- ESTILOS EJECUTIVOS ---
                     f_header = wb.add_format({'bold': True, 'bg_color': '#1F4E78', 'font_color': 'white', 'border': 1, 'align': 'center', 'font_size': 12})
                     f_sub    = wb.add_format({'font_size': 10, 'color': '#595959', 'align': 'left', 'bold': True})
                     f_perc   = wb.add_format({'num_format': '0.0%', 'bold': True, 'align': 'right', 'font_size': 11})
                     f_vrs    = wb.add_format({'font_size': 9, 'color': '#7F7F7F', 'align': 'left', 'italic': True})
-                    
-                    # Semáforo de Riesgo
                     f_bajo    = wb.add_format({'bg_color': '#C6EFCE', 'font_color': '#006100', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
                     f_medio   = wb.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C6500', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
                     f_alto    = wb.add_format({'bg_color': '#FFCC99', 'font_color': '#853300', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
                     f_critico = wb.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
-                    
-                    # Formatos de Tendencia
                     f_delta_up   = wb.add_format({'font_size': 10, 'color': '#9C0006', 'bold': True, 'align': 'center'})
                     f_delta_down = wb.add_format({'font_size': 10, 'color': '#006100', 'bold': True, 'align': 'center'})
 
@@ -301,98 +304,64 @@ if st.session_state.get("authentication_status"):
                             df_m = pd.DataFrame(st.session_state.analisis_cache[h_res['Mes']])
                             t = len(df_m) or 1
                             
-                            # 1. Encabezados y Traslape Total
                             ws.write(0, col_idx, mes_txt, f_header)
                             ws.write(1, col_idx, "📊 TRASLAPE TOTAL", f_sub)
                             ws.write(2, col_idx, h_res['Prom']/100, f_perc)
-                            ws.write(16, col_idx, t) # Datos para gráfica de barras (ocultos)
+                            ws.write(16, col_idx, t) 
                             
-                            # 2. Indicador de Tendencia (Delta)
                             if i > 0:
                                 diff = h_res['Prom'] - st.session_state.historico_resumen[i-1]['Prom']
                                 sym, fmt = ("▲", f_delta_up) if diff > 0 else ("▼", f_delta_down)
                                 ws.write(3, col_idx, f"{sym} {abs(round(diff,1))}% vs mes ant.", fmt)
                             
-                            # 3. Niveles de Riesgo (Los 4 niveles)
-                            niveles = [
-                                ("Bajo", 0, 25, f_bajo), 
-                                ("Medio", 25, 50, f_medio), 
-                                ("Alto", 50, 75, f_alto), 
-                                ("Crítico", 75, 100, f_critico)
-                            ]
-                            
+                            niveles = [("Bajo",0,25,f_bajo), ("Medio",25,50,f_medio), ("Alto",50,75,f_alto), ("Crítico",75,100,f_critico)]
                             r_row = 4
                             for n_nom, n_min, n_max, n_fmt in niveles:
-                                if n_nom == "Bajo":
-                                    count = len(df_m[df_m['Traslape'] <= 25])
-                                else:
-                                    count = len(df_m[(df_m['Traslape'] > n_min) & (df_m['Traslape'] <= n_max)])
-                                
+                                count = len(df_m[df_m['Traslape'] <= 25]) if n_nom == "Bajo" else len(df_m[(df_m['Traslape'] > n_min) & (df_m['Traslape'] <= n_max)])
                                 ws.write(r_row, col_idx, f"▨ {n_nom}", f_sub)
                                 ws.write(r_row+1, col_idx, count/t, n_fmt)
                                 ws.write(r_row+2, col_idx, f"{count} VRs", f_vrs)
                                 r_row += 3
-                            
                             col_idx += 1
 
-                        # --- 4. TENDENCIAS MINIATURA (SPARKLINES) ---
+                        # --- TENDENCIA ALINEADA (SPARKLINES) ---
                         ws.write(0, col_idx, "TENDENCIA", f_header)
-                        # Tendencia de Traslape Total
-                        ws.add_sparkline(2, col_idx, {'range': f'Resumen_Ejecutivo!A3:{xlsxwriter.utility.xl_col_to_name(col_idx-1)}3', 'type': 'line', 'line_color': '#1F4E78'})
-                        # Tendencia de Volumen (Barras)
-                        ws.add_sparkline(16, col_idx, {'range': f'Resumen_Ejecutivo!A17:{xlsxwriter.utility.xl_col_to_name(col_idx-1)}17', 'type': 'column', 'style': 12})
+                        last_c = xlsxwriter.utility.xl_col_to_name(col_idx - 1)
+                        filas_t = [2, 5, 8, 11, 14, 16]
+                        for ft in filas_t:
+                            tipo = 'line' if ft == 2 else 'column'
+                            ws.add_sparkline(ft, col_idx, {'range': f'Resumen_Ejecutivo!A{ft+1}:{last_c}{ft+1}', 'type': tipo, 'style': 18})
 
-                        # --- 5. GRÁFICA COMBINADA (CRECIMIENTO VS SALUD) ---
-                        bar_chart = wb.add_chart({'type': 'column'})
-                        line_chart = wb.add_chart({'type': 'line'})
-                        
-                        bar_chart.add_series({
-                            'name': 'Total VRs',
-                            'categories': ['Resumen_Ejecutivo', 0, 0, 0, col_idx - 1],
-                            'values': ['Resumen_Ejecutivo', 16, 0, 16, col_idx - 1],
-                            'fill': {'color': '#D9D9D9'}
-                        })
-                        line_chart.add_series({
-                            'name': 'Salud Operativa (%)',
-                            'categories': ['Resumen_Ejecutivo', 0, 0, 0, col_idx - 1],
-                            'values': ['Resumen_Ejecutivo', 2, 0, 2, col_idx - 1],
-                            'line': {'color': '#1F4E78', 'width': 3},
-                            'marker': {'type': 'circle', 'size': 8},
-                            'y2_axis': True,
-                            'data_labels': {'value': True, 'position': 'above'}
-                        })
-                        bar_chart.combine(line_chart)
-                        bar_chart.set_title({'name': 'CRECIMIENTO VS SALUD OPERATIVA', 'name_font': {'size': 14, 'bold': True}})
-                        bar_chart.set_legend({'position': 'bottom'})
-                        ws.insert_chart('A19', bar_chart, {'x_scale': 1.4, 'y_scale': 1.2})
-                        
+                        # --- GRÁFICA COMBINADA ---
+                        bar_c = wb.add_chart({'type': 'column'})
+                        line_c = wb.add_chart({'type': 'line'})
+                        bar_c.add_series({'name': 'Total VRs', 'categories': ['Resumen_Ejecutivo', 0, 0, 0, col_idx - 1], 'values': ['Resumen_Ejecutivo', 16, 0, 16, col_idx - 1], 'fill': {'color': '#D9D9D9'}})
+                        line_c.add_series({'name': 'Salud Operativa (%)', 'categories': ['Resumen_Ejecutivo', 0, 0, 0, col_idx - 1], 'values': ['Resumen_Ejecutivo', 2, 0, 2, col_idx - 1], 'line': {'color': '#1F4E78', 'width': 3}, 'marker': {'type': 'circle'}, 'y2_axis': True, 'data_labels': {'value': True}})
+                        bar_c.combine(line_c)
+                        bar_c.set_title({'name': 'CRECIMIENTO VS SALUD OPERATIVA'})
+                        ws.insert_chart('A19', bar_c, {'x_scale': 1.4, 'y_scale': 1.2})
                         ws.set_column(0, col_idx, 20)
 
-                        # --- 6. PESTAÑAS DE DETALLE (UNA POR MES) ---
+                        # --- PESTAÑAS DE DETALLE CON SEMÁFORO ---
                         for n_h in st.session_state.dict_hojas.keys():
                             df_det = pd.DataFrame(st.session_state.analisis_cache[n_h])[["Zona", "VOL", "Traslape"]]
                             prom_m = next((x['Prom'] for x in st.session_state.historico_resumen if x['Mes'] == n_h), 0)
                             df_det.rename(columns={"Zona": "VR", "VOL": "VOLUMEN", "Traslape": "TRASLAPE_%"}, inplace=True)
-                            
                             df_det.to_excel(wr, sheet_name=n_h[:31], index=False, startrow=2)
-                            ws_det = wr.sheets[n_h[:31]]
-                            
-                            # Encabezado de salud mensual en pestaña de detalle
-                            ws_det.write(0, 0, f"TRASLAPE TOTAL DEL MES ({n_h}):", f_sub)
-                            ws_det.write(0, 1, prom_m/100, f_perc)
-                            
-                            # Formato Condicional (Barras de Datos) y Congelar Paneles
-                            ws_det.freeze_panes(3, 0)
-                            ws_det.conditional_format(3, 2, len(df_det)+2, 2, {'type': 'data_bar', 'bar_color': '#FFC7CE'})
-                            ws_det.set_column(0, 2, 18)
+                            ws_d = wr.sheets[n_h[:31]]
+                            ws_d.write(0, 0, f"TRASLAPE TOTAL DEL MES ({n_h}):", f_sub)
+                            ws_d.write(0, 1, prom_m/100, f_perc)
+                            ws_d.conditional_format(f'C4:C{len(df_det)+3}', {'type': '3_color_scale', 'min_color': "#C6EFCE", 'mid_color': "#FFEB9C", 'max_color': "#FFC7CE"})
+                            ws_d.freeze_panes(3, 0)
+                            ws_d.set_column(0, 0, 45)
+                            ws_d.set_column(1, 2, 15)
                     
-                    else: # CASO COORDENADAS / POLÍGONOS
-                        pd.DataFrame(rep_coords).to_excel(wr, sheet_name="Reporte", index=False)
+                    else: pd.DataFrame(rep_coords).to_excel(wr, sheet_name="Reporte", index=False)
 
-                # --- BOTÓN DE DESCARGA FINAL ---
-                st.download_button(
-                    label="📥 Descargar Reporte",
-                    data=buf.getvalue(),
-                    file_name=nombre_archivo,
+                # 2. BOTÓN DE REPORTE (Lado Derecho - Alineado)
+                c2.download_button(
+                    label="📊 Descargar Reporte Excel", 
+                    data=buf.getvalue(), 
+                    file_name=nombre_archivo, 
                     use_container_width=True
                 )
