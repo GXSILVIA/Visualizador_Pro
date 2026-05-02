@@ -259,7 +259,7 @@ if st.session_state.get("authentication_status"):
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-            # --- SECCIÓN DE DESCARGAS (VERSIÓN FINAL COLORES SÓLIDOS) ---
+            # --- SECCIÓN DE DESCARGAS (VERSIÓN FINAL CORREGIDA SIN ERRORES) ---
             from datetime import datetime
             import xlsxwriter.utility
 
@@ -279,7 +279,7 @@ if st.session_state.get("authentication_status"):
                     f_sub    = wb.add_format({'font_size': 10, 'color': '#595959', 'bold': True})
                     f_perc   = wb.add_format({'num_format': '0.0%', 'bold': True, 'align': 'right', 'font_size': 11})
                     
-                    # Estilos de Celda por Nivel (Fondos Sólidos)
+                    # Estilos de Celda por Nivel (Fondos Sólidos EXACTOS)
                     f_bajo    = wb.add_format({'bg_color': '#00B050', 'font_color': 'white', 'bold': True, 'num_format': '0.0', 'border': 1, 'align': 'right'}) # Verde
                     f_medio   = wb.add_format({'bg_color': '#FFFF00', 'font_color': 'black', 'bold': True, 'num_format': '0.0', 'border': 1, 'align': 'right'}) # Amarillo
                     f_alto    = wb.add_format({'bg_color': '#FFC000', 'font_color': 'black', 'bold': True, 'num_format': '0.0', 'border': 1, 'align': 'right'}) # Naranja
@@ -316,13 +316,16 @@ if st.session_state.get("authentication_status"):
                                 r_row += 3
                             col_idx += 1
 
-                        # Tendencia Alineada
+                        # --- TENDENCIA ALINEADA (SPARKLINES) - CORREGIDO ---
                         ws.write(0, col_idx, "TENDENCIA", f_header)
                         lc = xlsxwriter.utility.xl_col_to_name(col_idx - 1)
-                        for ft in :
-                            ws.add_sparkline(ft, col_idx, {'range': f'Resumen_Ejecutivo!A{ft+1}:{lc}{ft+1}', 'type': 'line' if ft==2 else 'column', 'style': 18})
+                        # Filas: Total(2), Bajo(5), Medio(8), Alto(11), Crítico(14), Volumen(16)
+                        filas_t = [2, 5, 8, 11, 14, 16] 
+                        for ft in filas_t:
+                            tipo = 'line' if ft == 2 else 'column'
+                            ws.add_sparkline(ft, col_idx, {'range': f'Resumen_Ejecutivo!A{ft+1}:{lc}{ft+1}', 'type': tipo, 'style': 18})
 
-                        # Pestañas de Detalle con Colores Sólidos y Deltas Garantizados
+                        # --- PESTAÑAS DE DETALLE CON COLORES SÓLIDOS Y DELTAS ---
                         for idx_m, n_h in enumerate(st.session_state.dict_hojas.keys()):
                             df_det = pd.DataFrame(st.session_state.analisis_cache[n_h])[["Zona", "VOL", "Traslape"]]
                             prom_m = next((x['Prom'] for x in st.session_state.historico_resumen if x['Mes'] == n_h), 0)
@@ -350,14 +353,14 @@ if st.session_state.get("authentication_status"):
                             ws_d.write(0, 0, f"TRASLAPE TOTAL DEL MES ({n_h}):", f_sub)
                             ws_d.write(0, 1, prom_m/100, f_perc)
                             
-                            # --- APLICACIÓN DE COLORES SÓLIDOS ---
+                            # --- APLICACIÓN DE COLORES SÓLIDOS (Semaforización Fija) ---
                             rng = f'C4:C{len(df_det)+3}'
                             ws_d.conditional_format(rng, {'type': 'cell', 'criteria': '<=', 'value': 25, 'format': f_bajo})
                             ws_d.conditional_format(rng, {'type': 'cell', 'criteria': 'between', 'minimum': 25.01, 'maximum': 50, 'format': f_medio})
                             ws_d.conditional_format(rng, {'type': 'cell', 'criteria': 'between', 'minimum': 50.01, 'maximum': 75, 'format': f_alto})
                             ws_d.conditional_format(rng, {'type': 'cell', 'criteria': '>', 'value': 75, 'format': f_critico})
 
-                            # Deltas
+                            # Iconos de Tendencia (Color por Texto)
                             rng_t = f'D4:D{len(df_det)+3}'
                             ws_d.conditional_format(rng_t, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': f_d_red})
                             ws_d.conditional_format(rng_t, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': f_d_green})
