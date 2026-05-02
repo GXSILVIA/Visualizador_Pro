@@ -259,78 +259,107 @@ if st.session_state.get("authentication_status"):
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-            # --- SECCIÓN DE DESCARGAS (REPORTE MAESTRO) --- (LÍNEA 133 EN ADELANTE)
+            # --- SECCIÓN DE DESCARGAS (EXECUTIVE DASHBOARD ENGINE) ---
             c1, c2 = st.columns(2)
             c1.download_button("🗺️ Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower()}.html", use_container_width=True)
             
             if modo != "Polígonos CP":
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
-                    if modo == "Crecimiento":
-                        # --- 1. PESTAÑA DE RESUMEN EJECUTIVO (COMO TU IMAGEN) ---
-                        wb = wr.book
-                        ws = wb.add_worksheet("Resumen_Ejecutivo")
-                        
-                        # Formatos Visuales
-                        f_header = wb.add_format({'bold': True, 'bg_color': '#D9D9D9', 'border': 1, 'align': 'center', 'font_size': 12})
-                        f_sub    = wb.add_format({'font_size': 10, 'color': '#595959', 'align': 'left', 'bold': True})
-                        f_perc   = wb.add_format({'num_format': '0.00%', 'bold': True, 'align': 'right', 'font_size': 11})
-                        f_vrs    = wb.add_format({'font_size': 10, 'color': '#404040', 'align': 'left', 'italic': True})
-                        
-                        # Formatos de Colores por Nivel de Riesgo
-                        f_bajo    = wb.add_format({'bg_color': '#C6EFCE', 'font_color': '#006100', 'bold': True, 'num_format': '0.00%', 'align': 'right'})
-                        f_medio   = wb.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C6500', 'bold': True, 'num_format': '0.00%', 'align': 'right'})
-                        f_alto    = wb.add_format({'bg_color': '#FFCC99', 'font_color': '#853300', 'bold': True, 'num_format': '0.00%', 'align': 'right'})
-                        f_critico = wb.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'bold': True, 'num_format': '0.00%', 'align': 'right'})
-                        
-                        # Formatos de Tendencia (Delta)
-                        f_delta_up   = wb.add_format({'font_size': 10, 'color': '#9C0006', 'bold': True, 'bg_color': '#FFC7CE', 'align': 'center'})
-                        f_delta_down = wb.add_format({'font_size': 10, 'color': '#006100', 'bold': True, 'bg_color': '#C6EFCE', 'align': 'center'})
+                    wb = wr.book
+                    # --- DICCIONARIO DE ESTILOS EJECUTIVOS ---
+                    f_header = wb.add_format({'bold': True, 'bg_color': '#1F4E78', 'font_color': 'white', 'border': 1, 'align': 'center', 'font_size': 12})
+                    f_sub    = wb.add_format({'font_size': 10, 'color': '#595959', 'align': 'left', 'bold': True})
+                    f_perc   = wb.add_format({'num_format': '0.0%  ', 'bold': True, 'align': 'right', 'font_size': 12, 'font_name': 'Arial'})
+                    f_vrs    = wb.add_format({'font_size': 9, 'color': '#7F7F7F', 'align': 'left', 'italic': True})
+                    
+                    # Formatos de Alerta Semafórica
+                    f_bajo    = wb.add_format({'bg_color': '#C6EFCE', 'font_color': '#006100', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
+                    f_medio   = wb.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C6500', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
+                    f_alto    = wb.add_format({'bg_color': '#FFCC99', 'font_color': '#853300', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
+                    f_critico = wb.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
+                    
+                    # Deltas de Alto Impacto
+                    f_delta_up   = wb.add_format({'font_size': 10, 'color': '#9C0006', 'bold': True, 'align': 'center', 'italic': True})
+                    f_delta_down = wb.add_format({'font_size': 10, 'color': '#006100', 'bold': True, 'align': 'center', 'italic': True})
 
+                    if modo == "Crecimiento":
+                        ws = wb.add_worksheet("Resumen_Ejecutivo")
+                        ws.set_tab_color('#1F4E78')
+                        
                         col_idx = 0
                         for i, h_res in enumerate(st.session_state.historico_resumen):
-                            mes_nombre = h_res['Mes'].upper()
-                            df_mes_data = pd.DataFrame(st.session_state.analisis_cache[h_res['Mes']])
-                            total_vrs = len(df_mes_data) or 1
+                            mes_n = h_res['Mes'].upper()
+                            df_m = pd.DataFrame(st.session_state.analisis_cache[h_res['Mes']])
+                            t = len(df_m) or 1
                             
-                            # Escribir Mes
-                            ws.write(0, col_idx, mes_nombre, f_header)
-                            
-                            # Traslape Total y Delta
-                            ws.write(1, col_idx, "📊 Traslape Total", f_sub)
+                            # Escritura de Datos Estructurados
+                            ws.write(0, col_idx, mes_n, f_header)
+                            ws.write(1, col_idx, "📊 TRASLAPE TOTAL", f_sub)
                             ws.write(2, col_idx, h_res['Prom']/100, f_perc)
+                            
+                            # Fila Oculta para la gráfica (Total VRs) - Fila 17 (index 16)
+                            ws.write(16, col_idx, t) 
+                            
                             if i > 0:
                                 diff = h_res['Prom'] - st.session_state.historico_resumen[i-1]['Prom']
                                 sym, fmt = ("▲", f_delta_up) if diff > 0 else ("▼", f_delta_down)
                                 ws.write(3, col_idx, f"{sym} {abs(round(diff,1))}% vs mes ant.", fmt)
                             
-                            # Categorías: Bajo, Medio, Alto, Crítico
-                            niveles = [
-                                ("Bajo", 0, 25, f_bajo), 
-                                ("Medio", 25, 50, f_medio), 
-                                ("Alto", 50, 75, f_alto), 
-                                ("Crítico", 75, 100, f_critico)
-                            ]
-                            
+                            niveles = [("Bajo",0,25,f_bajo),("Medio",25,50,f_medio),("Alto",50,75,f_alto),("Crítico",75,100,f_critico)]
                             r_row = 4
                             for n_nom, n_min, n_max, n_fmt in niveles:
-                                count = len(df_mes_data[(df_mes_data['Traslape'] > n_min) & (df_mes_data['Traslape'] <= n_max)]) if n_nom != "Bajo" else len(df_mes_data[df_mes_data['Traslape'] <= 25])
+                                count = len(df_m[(df_m['Traslape'] > n_min) & (df_m['Traslape'] <= n_max)]) if n_nom != "Bajo" else len(df_m[df_m['Traslape'] <= 25])
                                 ws.write(r_row, col_idx, f"▨ {n_nom}", f_sub)
-                                ws.write(r_row+1, col_idx, count/total_vrs, n_fmt)
+                                ws.write(r_row+1, col_idx, count/t, n_fmt)
                                 ws.write(r_row+2, col_idx, f"{count} VRs", f_vrs)
                                 r_row += 3
-                            
                             col_idx += 1
-                        
-                        ws.set_column(0, col_idx, 22) # Ajuste de ancho
 
-                        # --- 2. DETALLE POR PESTAÑA (HOJAS INDIVIDUALES) ---
+                        # --- MOTOR DE GRÁFICO COMBINADO (BARRAS + LÍNEA) ---
+                        # Gráfico de Barras (Total VRs)
+                        bar_chart = wb.add_chart({'type': 'column'})
+                        bar_chart.add_series({
+                            'name':       'Total VRs',
+                            'categories': ['Resumen_Ejecutivo', 0, 0, 0, col_idx - 1],
+                            'values':     ['Resumen_Ejecutivo', 16, 0, 16, col_idx - 1],
+                            'fill':       {'color': '#D9D9D9', 'transparency': 50},
+                            'border':     {'color': '#BFBFBF'},
+                        })
+
+                        # Gráfico de Línea (Traslape %) - Eje Secundario
+                        line_chart = wb.add_chart({'type': 'line'})
+                        line_chart.add_series({
+                            'name':       'Salud Operativa (% Traslape)',
+                            'categories': ['Resumen_Ejecutivo', 0, 0, 0, col_idx - 1],
+                            'values':     ['Resumen_Ejecutivo', 2, 0, 2, col_idx - 1],
+                            'line':       {'color': '#1F4E78', 'width': 3},
+                            'marker':     {'type': 'circle', 'size': 10, 'border': {'color': '#1F4E78'}, 'fill': {'color': 'white'}},
+                            'data_labels':{'value': True, 'position': 'above', 'font': {'bold': True, 'size': 11}},
+                            'y2_axis':    True,
+                        })
+
+                        # Combinar y Estilizar
+                        bar_chart.combine(line_chart)
+                        bar_chart.set_title({'name': 'KPI: CRECIMIENTO VS SALUD OPERATIVA', 'name_font': {'size': 14, 'bold': True}})
+                        bar_chart.set_x_axis({'name': 'Línea de Tiempo Mensual'})
+                        bar_chart.set_y_axis({'name': 'Conteo de VRs'})
+                        bar_chart.set_y2_axis({'name': 'Porcentaje Traslape (%)', 'num_format': '0%'})
+                        bar_chart.set_legend({'position': 'bottom'})
+                        bar_chart.set_size({'width': 950, 'height': 450})
+                        
+                        # Insertar debajo del resumen
+                        ws.insert_chart('A19', bar_chart)
+                        ws.set_column(0, col_idx, 22)
+
+                        # Detalle de Datos (Pestañas Mensuales)
                         for n_h in st.session_state.dict_hojas.keys():
                             df_det = pd.DataFrame(st.session_state.analisis_cache[n_h])[["Zona", "VOL", "Traslape"]]
                             df_det.rename(columns={"Zona": "VR", "VOL": "VOLUMEN", "Traslape": "TRASLAPE_%"}, inplace=True)
                             df_det.to_excel(wr, sheet_name=n_h[:31], index=False)
-                            
-                    else: # Caso para Coordenadas
-                        pd.DataFrame(rep_coords).to_excel(wr, sheet_name="Reporte", index=False)
-                
-                c2.download_button("📊 Descargar Excel Maestro", data=buf.getvalue(), file_name=f"reporte_pro_{modo.lower()}.xlsx", use_container_width=True)
+                    
+                    else: # Caso Coordenadas/Stand-alone
+                        df_coord = pd.DataFrame(rep_coords)
+                        df_coord.to_excel(wr, sheet_name="Detalle_Operativo", index=False)
+
+                c2.download_button("📊 DESCARGAR REPORTE EJECUTIVO", data=buf.getvalue(), file_name=f"AMZL_Master_Report_{modo.upper()}.xlsx", use_container_width=True)
