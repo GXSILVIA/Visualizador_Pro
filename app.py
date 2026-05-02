@@ -259,7 +259,7 @@ if st.session_state.get("authentication_status"):
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-            # --- SECCIÓN DE DESCARGAS (REPORTE MAESTRO) ---
+            # --- SECCIÓN DE DESCARGAS (REPORTE MAESTRO) --- (LÍNEA 133 EN ADELANTE)
             c1, c2 = st.columns(2)
             c1.download_button("🗺️ Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower()}.html", use_container_width=True)
             
@@ -267,25 +267,70 @@ if st.session_state.get("authentication_status"):
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
                     if modo == "Crecimiento":
-                        # 1. Resumen General de todas las pestañas
-                        resumen_global = []
-                        for h_res in st.session_state.historico_resumen:
-                            n_h = h_res['Mes']
-                            df_h_data = pd.DataFrame(st.session_state.analisis_cache[n_h])
-                            total_v = len(df_h_data) or 1
-                            resumen_global.append({
-                                "PESTAÑA": n_h, "TOTAL VRs": total_v, "TRASLAPE TOTAL": f"{round(h_res['Prom'], 1)}%",
-                                "BAJO": f"{round(len(df_h_data[df_h_data['Traslape'] <= 25])/total_v*100, 1)}%",
-                                "CRÍTICO": f"{round(len(df_h_data[df_h_data['Traslape'] > 75])/total_v*100, 1)}%"
-                            })
-                        pd.DataFrame(resumen_global).to_excel(wr, sheet_name="Resumen_General", index=False)
+                        # --- 1. PESTAÑA DE RESUMEN EJECUTIVO (COMO TU IMAGEN) ---
+                        wb = wr.book
+                        ws = wb.add_worksheet("Resumen_Ejecutivo")
+                        
+                        # Formatos Visuales
+                        f_header = wb.add_format({'bold': True, 'bg_color': '#D9D9D9', 'border': 1, 'align': 'center', 'font_size': 12})
+                        f_sub    = wb.add_format({'font_size': 10, 'color': '#595959', 'align': 'left', 'bold': True})
+                        f_perc   = wb.add_format({'num_format': '0.00%', 'bold': True, 'align': 'right', 'font_size': 11})
+                        f_vrs    = wb.add_format({'font_size': 10, 'color': '#404040', 'align': 'left', 'italic': True})
+                        
+                        # Formatos de Colores por Nivel de Riesgo
+                        f_bajo    = wb.add_format({'bg_color': '#C6EFCE', 'font_color': '#006100', 'bold': True, 'num_format': '0.00%', 'align': 'right'})
+                        f_medio   = wb.add_format({'bg_color': '#FFEB9C', 'font_color': '#9C6500', 'bold': True, 'num_format': '0.00%', 'align': 'right'})
+                        f_alto    = wb.add_format({'bg_color': '#FFCC99', 'font_color': '#853300', 'bold': True, 'num_format': '0.00%', 'align': 'right'})
+                        f_critico = wb.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006', 'bold': True, 'num_format': '0.00%', 'align': 'right'})
+                        
+                        # Formatos de Tendencia (Delta)
+                        f_delta_up   = wb.add_format({'font_size': 10, 'color': '#9C0006', 'bold': True, 'bg_color': '#FFC7CE', 'align': 'center'})
+                        f_delta_down = wb.add_format({'font_size': 10, 'color': '#006100', 'bold': True, 'bg_color': '#C6EFCE', 'align': 'center'})
 
-                        # 2. Detalle de cada VR por cada pestaña
+                        col_idx = 0
+                        for i, h_res in enumerate(st.session_state.historico_resumen):
+                            mes_nombre = h_res['Mes'].upper()
+                            df_mes_data = pd.DataFrame(st.session_state.analisis_cache[h_res['Mes']])
+                            total_vrs = len(df_mes_data) or 1
+                            
+                            # Escribir Mes
+                            ws.write(0, col_idx, mes_nombre, f_header)
+                            
+                            # Traslape Total y Delta
+                            ws.write(1, col_idx, "📊 Traslape Total", f_sub)
+                            ws.write(2, col_idx, h_res['Prom']/100, f_perc)
+                            if i > 0:
+                                diff = h_res['Prom'] - st.session_state.historico_resumen[i-1]['Prom']
+                                sym, fmt = ("▲", f_delta_up) if diff > 0 else ("▼", f_delta_down)
+                                ws.write(3, col_idx, f"{sym} {abs(round(diff,1))}% vs mes ant.", fmt)
+                            
+                            # Categorías: Bajo, Medio, Alto, Crítico
+                            niveles = [
+                                ("Bajo", 0, 25, f_bajo), 
+                                ("Medio", 25, 50, f_medio), 
+                                ("Alto", 50, 75, f_alto), 
+                                ("Crítico", 75, 100, f_critico)
+                            ]
+                            
+                            r_row = 4
+                            for n_nom, n_min, n_max, n_fmt in niveles:
+                                count = len(df_mes_data[(df_mes_data['Traslape'] > n_min) & (df_mes_data['Traslape'] <= n_max)]) if n_nom != "Bajo" else len(df_mes_data[df_mes_data['Traslape'] <= 25])
+                                ws.write(r_row, col_idx, f"▨ {n_nom}", f_sub)
+                                ws.write(r_row+1, col_idx, count/total_vrs, n_fmt)
+                                ws.write(r_row+2, col_idx, f"{count} VRs", f_vrs)
+                                r_row += 3
+                            
+                            col_idx += 1
+                        
+                        ws.set_column(0, col_idx, 22) # Ajuste de ancho
+
+                        # --- 2. DETALLE POR PESTAÑA (HOJAS INDIVIDUALES) ---
                         for n_h in st.session_state.dict_hojas.keys():
                             df_det = pd.DataFrame(st.session_state.analisis_cache[n_h])[["Zona", "VOL", "Traslape"]]
                             df_det.rename(columns={"Zona": "VR", "VOL": "VOLUMEN", "Traslape": "TRASLAPE_%"}, inplace=True)
-                            df_det.to_excel(wr, sheet_name=n_h[:30], index=False)
-                    else:
+                            df_det.to_excel(wr, sheet_name=n_h[:31], index=False)
+                            
+                    else: # Caso para Coordenadas
                         pd.DataFrame(rep_coords).to_excel(wr, sheet_name="Reporte", index=False)
                 
                 c2.download_button("📊 Descargar Excel Maestro", data=buf.getvalue(), file_name=f"reporte_pro_{modo.lower()}.xlsx", use_container_width=True)
