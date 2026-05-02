@@ -259,11 +259,11 @@ if st.session_state.get("authentication_status"):
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-            # --- SECCIÓN DE DESCARGAS (VERSIÓN SUPREME EJECUTIVA) ---
+             # --- SECCIÓN DE DESCARGAS (VERSIÓN SUPREME CORREGIDA) ---
             from datetime import datetime
             import xlsxwriter.utility
 
-            # Alineación de botones en dos columnas simétricas
+            # Alineación de botones simétrica
             c1, c2 = st.columns(2)
             
             c1.download_button(
@@ -281,24 +281,21 @@ if st.session_state.get("authentication_status"):
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
                     wb = wr.book
                     
-                    # --- ESTILOS EJECUTIVOS Y DE ALERTA ---
+                    # --- ESTILOS EJECUTIVOS ---
                     f_header = wb.add_format({'bold': True, 'bg_color': '#1F4E78', 'font_color': 'white', 'border': 1, 'align': 'center', 'font_size': 12})
                     f_sub    = wb.add_format({'font_size': 10, 'color': '#595959', 'align': 'left', 'bold': True})
                     f_perc   = wb.add_format({'num_format': '0.0%', 'bold': True, 'align': 'right', 'font_size': 11})
                     f_vrs    = wb.add_format({'font_size': 9, 'color': '#7F7F7F', 'italic': True})
                     
-                    # Formatos Semafóricos Sólidos
                     f_bajo    = wb.add_format({'bg_color': '#00B050', 'font_color': 'white', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
                     f_medio   = wb.add_format({'bg_color': '#FFC000', 'font_color': 'black', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
                     f_alto    = wb.add_format({'bg_color': '#FF0000', 'font_color': 'white', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
                     f_critico = wb.add_format({'bg_color': '#800000', 'font_color': 'white', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
                     
-                    # Deltas (Iconos)
                     f_d_red   = wb.add_format({'font_color': '#C00000', 'bold': True, 'align': 'center'})
                     f_d_green = wb.add_format({'font_color': '#00B050', 'bold': True, 'align': 'center'})
 
                     if modo == "Crecimiento":
-                        # --- 1. RESUMEN EJECUTIVO (DASHBOARD) ---
                         ws = wb.add_worksheet("Resumen_Ejecutivo")
                         ws.set_tab_color('#1F4E78')
                         
@@ -327,11 +324,14 @@ if st.session_state.get("authentication_status"):
                                 r_row += 3
                             col_idx += 1
 
-                        # Tendencia alineada
+                        # --- TENDENCIA ALINEADA (SPARKLINES) ---
                         ws.write(0, col_idx, "TENDENCIA", f_header)
                         lc = xlsxwriter.utility.xl_col_to_name(col_idx - 1)
-                        for ft in :
-                            ws.add_sparkline(ft, col_idx, {'range': f'Resumen_Ejecutivo!A{ft+1}:{lc}{ft+1}', 'type': 'line' if ft==2 else 'column', 'style': 18})
+                        # Filas: Total(2), Bajo(5), Medio(8), Alto(11), Crítico(14), Volumen(16)
+                        filas_t = [2, 5, 8, 11, 14, 16]
+                        for ft in filas_t:
+                            tipo = 'line' if ft == 2 else 'column'
+                            ws.add_sparkline(ft, col_idx, {'range': f'Resumen_Ejecutivo!A{ft+1}:{lc}{ft+1}', 'type': tipo, 'style': 18})
 
                         # Gráfica Ejecutiva
                         bc = wb.add_chart({'type': 'column'})
@@ -343,12 +343,11 @@ if st.session_state.get("authentication_status"):
                         ws.insert_chart('A19', bc, {'x_scale': 1.4, 'y_scale': 1.2})
                         ws.set_column(0, col_idx, 20)
 
-                        # --- 2. PESTAÑAS DE DETALLE CON DELTAS POR VR ---
+                        # --- PESTAÑAS DE DETALLE ---
                         for idx_m, n_h in enumerate(st.session_state.dict_hojas.keys()):
                             df_det = pd.DataFrame(st.session_state.analisis_cache[n_h])[["Zona", "VOL", "Traslape"]]
                             prom_m = next((x['Prom'] for x in st.session_state.historico_resumen if x['Mes'] == n_h), 0)
                             
-                            # Comparativa vs mes anterior para cada VR
                             df_p = None
                             if idx_m > 0:
                                 m_ant = list(st.session_state.dict_hojas.keys())[idx_m-1]
@@ -370,7 +369,6 @@ if st.session_state.get("authentication_status"):
                             ws_d.write(0, 0, f"TRASLAPE TOTAL DEL MES ({n_h}):", f_sub)
                             ws_d.write(0, 1, prom_m/100, f_perc)
                             
-                            # Semáforo Sólido y Deltas
                             ws_d.conditional_format(f'C4:C{len(df_det)+3}', {'type': '3_color_scale', 'min_color': "#00B050", 'mid_color': "#FFC000", 'max_color': "#C00000"})
                             ws_d.conditional_format(f'D4:D{len(df_det)+3}', {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': f_d_red})
                             ws_d.conditional_format(f'D4:D{len(df_det)+3}', {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': f_d_green})
