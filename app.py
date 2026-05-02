@@ -259,19 +259,12 @@ if st.session_state.get("authentication_status"):
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-             # --- SECCIÓN DE DESCARGAS (VERSIÓN SUPREME CORREGIDA) ---
+            # --- SECCIÓN DE DESCARGAS (VERSIÓN FINAL COLORES SÓLIDOS) ---
             from datetime import datetime
             import xlsxwriter.utility
 
-            # Alineación de botones simétrica
             c1, c2 = st.columns(2)
-            
-            c1.download_button(
-                label="🗺️ Descargar Mapa HTML", 
-                data=map_html, 
-                file_name=f"mapa_{modo.lower()}.html", 
-                use_container_width=True
-            )
+            c1.download_button(label="🗺️ Descargar Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower()}.html", use_container_width=True)
             
             if modo != "Polígonos CP":
                 fecha_hoy = datetime.now().strftime("%d_%m_%Y")
@@ -281,16 +274,16 @@ if st.session_state.get("authentication_status"):
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
                     wb = wr.book
                     
-                    # --- ESTILOS EJECUTIVOS ---
-                    f_header = wb.add_format({'bold': True, 'bg_color': '#1F4E78', 'font_color': 'white', 'border': 1, 'align': 'center', 'font_size': 12})
-                    f_sub    = wb.add_format({'font_size': 10, 'color': '#595959', 'align': 'left', 'bold': True})
+                    # --- DEFINICIÓN DE COLORES CORPORATIVOS SÓLIDOS ---
+                    f_header = wb.add_format({'bold': True, 'bg_color': '#1F4E78', 'font_color': 'white', 'border': 1, 'align': 'center'})
+                    f_sub    = wb.add_format({'font_size': 10, 'color': '#595959', 'bold': True})
                     f_perc   = wb.add_format({'num_format': '0.0%', 'bold': True, 'align': 'right', 'font_size': 11})
-                    f_vrs    = wb.add_format({'font_size': 9, 'color': '#7F7F7F', 'italic': True})
                     
-                    f_bajo    = wb.add_format({'bg_color': '#00B050', 'font_color': 'white', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
-                    f_medio   = wb.add_format({'bg_color': '#FFC000', 'font_color': 'black', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
-                    f_alto    = wb.add_format({'bg_color': '#FF0000', 'font_color': 'white', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
-                    f_critico = wb.add_format({'bg_color': '#800000', 'font_color': 'white', 'bold': True, 'num_format': '0.0%', 'align': 'right', 'border': 1})
+                    # Estilos de Celda por Nivel (Fondos Sólidos)
+                    f_bajo    = wb.add_format({'bg_color': '#00B050', 'font_color': 'white', 'bold': True, 'num_format': '0.0', 'border': 1, 'align': 'right'}) # Verde
+                    f_medio   = wb.add_format({'bg_color': '#FFFF00', 'font_color': 'black', 'bold': True, 'num_format': '0.0', 'border': 1, 'align': 'right'}) # Amarillo
+                    f_alto    = wb.add_format({'bg_color': '#FFC000', 'font_color': 'black', 'bold': True, 'num_format': '0.0', 'border': 1, 'align': 'right'}) # Naranja
+                    f_critico = wb.add_format({'bg_color': '#FF0000', 'font_color': 'white', 'bold': True, 'num_format': '0.0', 'border': 1, 'align': 'right'}) # Rojo
                     
                     f_d_red   = wb.add_format({'font_color': '#C00000', 'bold': True, 'align': 'center'})
                     f_d_green = wb.add_format({'font_color': '#00B050', 'bold': True, 'align': 'center'})
@@ -303,7 +296,6 @@ if st.session_state.get("authentication_status"):
                         for i, h_res in enumerate(st.session_state.historico_resumen):
                             df_m = pd.DataFrame(st.session_state.analisis_cache[h_res['Mes']])
                             t = len(df_m) or 1
-                            
                             ws.write(0, col_idx, h_res['Mes'].upper(), f_header)
                             ws.write(1, col_idx, "📊 TRASLAPE TOTAL", f_sub)
                             ws.write(2, col_idx, h_res['Prom']/100, f_perc)
@@ -320,30 +312,17 @@ if st.session_state.get("authentication_status"):
                                 count = len(df_m[df_m['Traslape'] <= 25]) if n_nom == "Bajo" else len(df_m[(df_m['Traslape'] > n_min) & (df_m['Traslape'] <= n_max)])
                                 ws.write(r_row, col_idx, f"▨ {n_nom}", f_sub)
                                 ws.write(r_row+1, col_idx, count/t, n_fmt)
-                                ws.write(r_row+2, col_idx, f"{count} VRs", f_vrs)
+                                ws.write(r_row+2, col_idx, f"{count} VRs", wb.add_format({'font_size': 9, 'italic': True}))
                                 r_row += 3
                             col_idx += 1
 
-                        # --- TENDENCIA ALINEADA (SPARKLINES) ---
+                        # Tendencia Alineada
                         ws.write(0, col_idx, "TENDENCIA", f_header)
                         lc = xlsxwriter.utility.xl_col_to_name(col_idx - 1)
-                        # Filas: Total(2), Bajo(5), Medio(8), Alto(11), Crítico(14), Volumen(16)
-                        filas_t = [2, 5, 8, 11, 14, 16]
-                        for ft in filas_t:
-                            tipo = 'line' if ft == 2 else 'column'
-                            ws.add_sparkline(ft, col_idx, {'range': f'Resumen_Ejecutivo!A{ft+1}:{lc}{ft+1}', 'type': tipo, 'style': 18})
+                        for ft in :
+                            ws.add_sparkline(ft, col_idx, {'range': f'Resumen_Ejecutivo!A{ft+1}:{lc}{ft+1}', 'type': 'line' if ft==2 else 'column', 'style': 18})
 
-                        # Gráfica Ejecutiva
-                        bc = wb.add_chart({'type': 'column'})
-                        lc = wb.add_chart({'type': 'line'})
-                        bc.add_series({'name': 'Total VRs', 'categories': ['Resumen_Ejecutivo', 0, 0, 0, col_idx - 1], 'values': ['Resumen_Ejecutivo', 16, 0, 16, col_idx - 1], 'fill': {'color': '#D9D9D9'}})
-                        lc.add_series({'name': 'Traslape %', 'categories': ['Resumen_Ejecutivo', 0, 0, 0, col_idx - 1], 'values': ['Resumen_Ejecutivo', 2, 0, 2, col_idx - 1], 'line': {'color': '#1F4E78', 'width': 3}, 'marker': {'type': 'circle'}, 'y2_axis': True, 'data_labels': {'value': True}})
-                        bc.combine(lc)
-                        bc.set_title({'name': 'CRECIMIENTO VS SALUD OPERATIVA'})
-                        ws.insert_chart('A19', bc, {'x_scale': 1.4, 'y_scale': 1.2})
-                        ws.set_column(0, col_idx, 20)
-
-                        # --- PESTAÑAS DE DETALLE ---
+                        # Pestañas de Detalle con Colores Sólidos y Deltas Garantizados
                         for idx_m, n_h in enumerate(st.session_state.dict_hojas.keys()):
                             df_det = pd.DataFrame(st.session_state.analisis_cache[n_h])[["Zona", "VOL", "Traslape"]]
                             prom_m = next((x['Prom'] for x in st.session_state.historico_resumen if x['Mes'] == n_h), 0)
@@ -351,37 +330,41 @@ if st.session_state.get("authentication_status"):
                             df_p = None
                             if idx_m > 0:
                                 m_ant = list(st.session_state.dict_hojas.keys())[idx_m-1]
-                                df_p = pd.DataFrame(st.session_state.analisis_cache[m_ant]).set_index('Zona')
+                                df_p = pd.DataFrame(st.session_state.analisis_cache[m_ant]).set_index('Zona')['Traslape'].to_dict()
 
                             def calc_v_delta(row):
-                                if df_p is not None and row['Zona'] in df_p.index:
-                                    diff = row['Traslape'] - df_p.loc[row['Zona'], 'Traslape']
+                                z = str(row['Zona']).strip()
+                                if df_p and z in df_p:
+                                    diff = row['Traslape'] - df_p[z]
                                     if diff > 0: return f"▲ {abs(round(diff,1))}%"
                                     if diff < 0: return f"▼ {abs(round(diff,1))}%"
+                                    return "• 0.0%"
                                 return "-"
 
                             df_det['TENDENCIA'] = df_det.apply(calc_v_delta, axis=1)
                             df_det.rename(columns={"Zona":"VR", "VOL":"VOLUMEN", "Traslape":"% TRASLAPE"}, inplace=True)
                             df_det = df_det[["VR", "VOLUMEN", "% TRASLAPE", "TENDENCIA"]]
-                            
                             df_det.to_excel(wr, sheet_name=n_h[:31], index=False, startrow=2)
+                            
                             ws_d = wr.sheets[n_h[:31]]
                             ws_d.write(0, 0, f"TRASLAPE TOTAL DEL MES ({n_h}):", f_sub)
                             ws_d.write(0, 1, prom_m/100, f_perc)
                             
-                            ws_d.conditional_format(f'C4:C{len(df_det)+3}', {'type': '3_color_scale', 'min_color': "#00B050", 'mid_color': "#FFC000", 'max_color': "#C00000"})
-                            ws_d.conditional_format(f'D4:D{len(df_det)+3}', {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': f_d_red})
-                            ws_d.conditional_format(f'D4:D{len(df_det)+3}', {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': f_d_green})
+                            # --- APLICACIÓN DE COLORES SÓLIDOS ---
+                            rng = f'C4:C{len(df_det)+3}'
+                            ws_d.conditional_format(rng, {'type': 'cell', 'criteria': '<=', 'value': 25, 'format': f_bajo})
+                            ws_d.conditional_format(rng, {'type': 'cell', 'criteria': 'between', 'minimum': 25.01, 'maximum': 50, 'format': f_medio})
+                            ws_d.conditional_format(rng, {'type': 'cell', 'criteria': 'between', 'minimum': 50.01, 'maximum': 75, 'format': f_alto})
+                            ws_d.conditional_format(rng, {'type': 'cell', 'criteria': '>', 'value': 75, 'format': f_critico})
+
+                            # Deltas
+                            rng_t = f'D4:D{len(df_det)+3}'
+                            ws_d.conditional_format(rng_t, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': f_d_red})
+                            ws_d.conditional_format(rng_t, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': f_d_green})
                             
                             ws_d.freeze_panes(3, 0)
-                            ws_d.set_column(0, 0, 45)
-                            ws_d.set_column(1, 3, 15)
+                            ws_d.set_column(0, 0, 45); ws_d.set_column(1, 3, 15)
                     
                     else: pd.DataFrame(rep_coords).to_excel(wr, sheet_name="Reporte", index=False)
 
-                c2.download_button(
-                    label="📊 Descargar Reporte Excel", 
-                    data=buf.getvalue(), 
-                    file_name=nombre_archivo, 
-                    use_container_width=True
-                )
+                c2.download_button(label="📊 Descargar Reporte Excel", data=buf.getvalue(), file_name=nombre_archivo, use_container_width=True)
