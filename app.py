@@ -259,7 +259,7 @@ if st.session_state.get("authentication_status"):
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-        # --- SECCIÓN DE DESCARGAS: DASHBOARD DE INTELIGENCIA OPERATIVA FINAL ---
+        # --- SECCIÓN DE DESCARGAS: DASHBOARD DE INTELIGENCIA OPERATIVA (CORRECCIÓN TOTAL) ---
         from datetime import datetime
         import xlsxwriter.utility
         import unicodedata
@@ -272,7 +272,7 @@ if st.session_state.get("authentication_status"):
         st.write("---")
         c_desc1, c_desc2 = st.columns(2)
 
-        # 1. RENDERIZADO DE MAPA
+        # 1. RENDERIZADO DE MAPA (Renderizado único)
         map_html = m.get_root().render()
         c_desc1.download_button(label="🗺️ Descargar Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower().replace(' ','_')}.html", use_container_width=True)
 
@@ -335,13 +335,14 @@ if st.session_state.get("authentication_status"):
                     ws_res.write(24, col_idx, int(df_m['VOL'].mean()), wb.add_format({'bold':True, 'bg_color':'#DDEBF7', 'border':1, 'align':'center'}))
                     col_idx += 1
 
-                # --- SPARKINES DE TENDENCIA ---
-                ws_res.write(4, col_idx, "TENDENCIA", f_mes_h)
+                # --- 3. TENDENCIAS (SPARKLINES CORREGIDOS) ---
+                ws_res.write(4, col_idx, "TENDENCIA", f_header)
                 l_col = xlsxwriter.utility.xl_col_to_name(col_idx - 1)
+                # Filas exactas que llevan Sparkline: Traslape(5), %s(7,11,15,19), Total(23), Carga(24)
                 for r_spark in [5, 7, 11, 15, 19, 23, 24]:
                     ws_res.add_sparkline(r_spark, col_idx, {'range': f'RESUMEN!B{r_spark+1}:{l_col}{r_spark+1}', 'type': 'column', 'style': 18})
 
-                # --- GRÁFICA DE DILUCIÓN (ESTRATÉGICA) ---
+                # --- 4. GRÁFICA DE DILUCIÓN VS DENSIDAD ---
                 c1 = wb.add_chart({'type': 'column'}); l1 = wb.add_chart({'type': 'line'}); l2 = wb.add_chart({'type': 'line'})
                 c1.add_series({'name': 'VRs Totales', 'categories': f'=RESUMEN!$B$5:${l_col}$5', 'values': f'=RESUMEN!$B$24:${l_col}$24', 'fill': {'color': '#DDEBF7'}})
                 l1.add_series({'name': 'Carga Prom.', 'values': f'=RESUMEN!$B$25:${l_col}$25', 'line': {'color': '#00B050', 'width': 2}})
@@ -349,7 +350,7 @@ if st.session_state.get("authentication_status"):
                 c1.combine(l1); c1.combine(l2)
                 c1.set_title({'name': 'CORRELACIÓN: DILUCIÓN VS DENSIDAD'}); ws_res.insert_chart('B28', c1, {'x_scale': 1.6})
 
-                # --- PESTAÑAS DE DETALLE (SIN ESTATUS) ---
+                # --- 5. PESTAÑAS DE DETALLE (LIMPIAS) ---
                 for idx_m, n_h in enumerate(st.session_state.dict_hojas.keys()):
                     df_d = pd.DataFrame(st.session_state.analisis_cache[n_h]).copy()
                     df_ant = {limpiar_texto(r['Zona']): r for r in st.session_state.analisis_cache[list(st.session_state.dict_hojas.keys())[idx_m-1]]} if idx_m > 0 else {}
@@ -364,7 +365,9 @@ if st.session_state.get("authentication_status"):
                             dv, dt = int(r['VOL']-df_ant[z_l]['VOL']), round(r['Traslape']-df_ant[z_l]['Traslape'], 1)
                             ws_det.write(row, 2, f"{'▲ +' if dv>0 else '▼ '}{dv}.0", wb.add_format({'font_color':'#00B050' if dv>0 else '#FF0000' if dv<0 else '#000', 'bold':True, 'align':'right'}))
                             ws_det.write(row, 4, f"{'▲' if dt>0 else '▼'} {abs(dt)}%", wb.add_format({'font_color':'#FF0000' if dt>0 else '#00B050' if dt<0 else '#000', 'bold':True, 'align':'right'}))
-                        else: [ws_det.write(row, c, "▼ NUEVO", wb.add_format({'align':'right', 'bold':True})) for c in [2,4]]
+                        else:
+                            ws_det.write(row, 2, "▼ NUEVO", wb.add_format({'align':'right', 'bold':True}))
+                            ws_det.write(row, 4, "▼ NUEVO", wb.add_format({'align':'right', 'bold':True}))
                         ws_det.write(row, 3, r['Traslape']/100, f_v if r['Traslape']<=25 else f_a if r['Traslape']<=50 else f_n if r['Traslape']<=75 else f_r)
 
             else: pd.DataFrame(rep_coords).to_excel(wr, sheet_name="Reporte", index=False)
