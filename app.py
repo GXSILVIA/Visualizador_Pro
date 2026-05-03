@@ -259,7 +259,7 @@ if st.session_state.get("authentication_status"):
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-            # --- SECCIÓN DE DESCARGAS UNIFICADA (DASHBOARD EDITION) ---
+            # --- SECCIÓN DE DESCARGAS: DASHBOARD CON SPARKINES DE TENDENCIA HISTÓRICA ---
             from datetime import datetime
             import xlsxwriter.utility
             import unicodedata
@@ -274,100 +274,81 @@ if st.session_state.get("authentication_status"):
             
             if modo != "Polígonos CP":
                 fecha_hoy = datetime.now().strftime("%d_%m_%Y")
-                nombre_archivo = f"Reporte_Dashboard_{fecha_hoy}.xlsx"
+                nombre_archivo = f"Dashboard_Analisis_Pro_{fecha_hoy}.xlsx"
                 buf = io.BytesIO()
                 
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
                     wb = wr.book
-                    # --- DEFINICIÓN DE FORMATOS Y SEMÁFORO ---
-                    f_bg      = wb.add_format({'bg_color': '#F2F2F2'})
-                    f_title   = wb.add_format({'bold': True, 'font_size': 16, 'font_color': '#1F4E78', 'valign': 'vcenter'})
-                    f_header  = wb.add_format({'bold': True, 'bg_color': '#1F4E78', 'font_color': 'white', 'border': 1, 'align': 'center'})
-                    f_sub     = wb.add_format({'font_size': 9, 'color': '#595959', 'bold': True, 'bg_color': '#FFFFFF', 'align': 'center'})
-                    f_perc    = wb.add_format({'num_format': '0.0%', 'bold': True, 'align': 'center', 'font_size': 13, 'bg_color': '#FFFFFF'})
-                    f_vol_box = wb.add_format({'font_size': 9, 'italic': True, 'bg_color': '#FFFFFF', 'align': 'center', 'border': 1, 'border_color': '#D9D9D9'})
+                    # --- FORMATOS ---
+                    f_azul_h = wb.add_format({'bg_color': '#1F4E78', 'font_color': 'white', 'bold': True, 'align': 'center', 'border': 1})
+                    f_val_w  = wb.add_format({'bg_color': '#FFFFFF', 'bold': True, 'align': 'center', 'num_format': '0.0%', 'border': 1})
+                    f_sub_it = wb.add_format({'font_size': 9, 'color': '#595959', 'italic': True, 'align': 'center', 'bg_color': '#FFFFFF'})
                     
-                    # SEMÁFORO SOLICITADO
-                    f_bajo   = wb.add_format({'bg_color': '#92D050', 'font_color': 'black', 'bold': True, 'num_format': '0.0%', 'border': 1, 'align': 'right'}) # VERDE
-                    f_medio  = wb.add_format({'bg_color': '#FFFFCC', 'font_color': 'black', 'bold': True, 'num_format': '0.0%', 'border': 1, 'align': 'right'}) # AMARILLO CLARO
-                    f_alto   = wb.add_format({'bg_color': '#FFC000', 'font_color': 'black', 'bold': True, 'num_format': '0.0%', 'border': 1, 'align': 'right'}) # NARANJA
-                    f_crit   = wb.add_format({'bg_color': '#FF0000', 'font_color': 'white', 'bold': True, 'num_format': '0.0%', 'border': 1, 'align': 'right'}) # ROJO
-                    
-                    f_d_red  = wb.add_format({'font_color': '#C00000', 'bold': True, 'align': 'center', 'bg_color': '#FFFFFF'})
-                    f_d_green= wb.add_format({'font_color': '#00B050', 'bold': True, 'align': 'center', 'bg_color': '#FFFFFF'})
+                    # SEMÁFORO INTENSO
+                    f_v = wb.add_format({'bg_color': '#92D050', 'bold': True, 'border': 1, 'num_format': '0.0%', 'align': 'right'})
+                    f_a = wb.add_format({'bg_color': '#FFFF00', 'bold': True, 'border': 1, 'num_format': '0.0%', 'align': 'right'})
+                    f_n = wb.add_format({'bg_color': '#FFC000', 'bold': True, 'border': 1, 'num_format': '0.0%', 'align': 'right'})
+                    f_r = wb.add_format({'bg_color': '#FF0000', 'font_color': 'white', 'bold': True, 'border': 1, 'num_format': '0.0%', 'align': 'right'})
 
                     if modo == "Crecimiento":
-                        # --- 1. PESTAÑA RESUMEN ---
                         ws = wb.add_worksheet("RESUMEN")
                         ws.hide_gridlines(2)
-                        ws.set_column('A:Z', 20, f_bg)
-                        ws.merge_range('A1:D2', "DASHBOARD OPERATIVO - RESUMEN DE CRECIMIENTO", f_title)
+                        ws.set_column('A:A', 22); ws.set_column('B:Z', 18)
                         
-                        col_idx = 0
+                        ws.merge_range('A1:E2', "DASHBOARD OPERATIVO: TENDENCIAS POR NIVEL", wb.add_format({'bold': True, 'font_size': 18, 'font_color': '#1F4E78'}))
+                        
+                        col_idx = 1
+                        num_meses = len(st.session_state.historico_resumen)
+                        
                         for i, h_res in enumerate(st.session_state.historico_resumen):
                             df_m = pd.DataFrame(st.session_state.analisis_cache[h_res['Mes']])
-                            t = len(df_m) or 1
+                            t_total = len(df_m) or 1
                             
-                            ws.write(3, col_idx, h_res['Mes'].upper(), f_header)
-                            ws.write(4, col_idx, "📊 TRASLAPE PROMEDIO", f_sub)
-                            ws.write(5, col_idx, h_res['Prom']/100, f_perc)
+                            # Cabecera
+                            ws.write(4, col_idx, h_res['Mes'].upper(), f_azul_h)
+                            ws.write(5, col_idx, h_res['Prom']/100, f_val_w)
                             
-                            niveles = [("Bajo",0,25,f_bajo), ("Medio",25,50,f_medio), ("Alto",50,75,f_alto), ("Crítico",75,100,f_crit)]
-                            r_row = 7
-                            for n_nom, n_min, n_max, n_fmt in niveles:
+                            # Bloques por Nivel
+                            nivs = [("Bajo",0,25,f_v), ("Medio",25,50,f_a), ("Alto",50,75,f_n), ("Crit",75,100,f_r)]
+                            r_ini = 8
+                            for n_nom, n_min, n_max, n_fmt in nivs:
                                 mask = (df_m['Traslape'] <= 25) if n_nom == "Bajo" else ((df_m['Traslape'] > n_min) & (df_m['Traslape'] <= n_max))
                                 subset = df_m[mask]
-                                count = len(subset)
-                                v_prom = subset['VOL'].mean() if count > 0 else 0
+                                count_vr = len(subset)
+                                vol_p_real = subset['VOL'].mean() if count_vr > 0 else 0
                                 
-                                ws.write(r_row, col_idx, f"NIVEL {n_nom.upper()}", f_sub)
-                                ws.write(r_row+1, col_idx, count/t, n_fmt)
-                                ws.write(r_row+2, col_idx, f"Vol. Prom: {int(v_prom)}", f_vol_box)
-                                r_row += 4
-                            
-                            ws.write(25, col_idx, t, wb.add_format({'hidden': True}))
+                                ws.write(r_ini, col_idx, f"{count_vr} VRS", f_sub_it)
+                                ws.write(r_ini+1, col_idx, count_vr/t_total, n_fmt)
+                                ws.write(r_ini+2, col_idx, f"Vol. Prom: {int(vol_p_real)}", f_sub_it)
+                                r_ini += 4
                             col_idx += 1
 
-                        # --- 2. PESTAÑAS DE DETALLE ---
-                        for idx_m, n_h in enumerate(st.session_state.dict_hojas.keys()):
-                            df_det = pd.DataFrame(st.session_state.analisis_cache[n_h])[["Zona", "VOL", "Traslape"]]
-                            
-                            # Lógica Tendencia Volumen
-                            df_p_vol = {}
-                            if idx_m > 0:
-                                m_ant = list(st.session_state.dict_hojas.keys())[idx_m-1]
-                                df_p_vol = {limpiar_texto(r['Zona']): r['VOL'] for r in st.session_state.analisis_cache[m_ant]}
-                            
-                            def calc_t_vol(row):
-                                z = limpiar_texto(row['Zona'])
-                                if z in df_p_vol:
-                                    diff = row['VOL'] - df_p_vol[z]
-                                    return f"▲ +{int(diff)}" if diff > 0 else (f"▼ {int(diff)}" if diff < 0 else "• 0")
-                                return "NUEVO"
+                        # --- COLUMNA DE TENDENCIA HISTÓRICA (Sparklines) ---
+                        ws.write(4, col_idx, "TENDENCIA", f_azul_h)
+                        lc = xlsxwriter.utility.xl_col_to_name(col_idx - 1) # Última columna con datos
+                        
+                        # Añadir Sparklines para cada nivel (filas de porcentajes)
+                        spark_rows = [5, 9, 13, 17, 21] # Traslape Total, Bajo, Medio, Alto, Crítico
+                        for r_spark in spark_rows:
+                            ws.add_sparkline(r_spark, col_idx, {
+                                'range': f'RESUMEN!B{r_spark+1}:{lc}{r_spark+1}',
+                                'type': 'line',
+                                'style': 18,
+                                'markers': True
+                            })
+                        
+                        ws.set_column(col_idx, col_idx, 15)
 
-                            df_det['TENDENCIA VOL'] = df_det.apply(calc_t_vol, axis=1)
-                            df_det.rename(columns={"Zona":"VR", "VOL":"VOLUMEN", "Traslape":"% TRASLAPE"}, inplace=True)
-                            df_det = df_det[["VR", "VOLUMEN", "TENDENCIA VOL", "% TRASLAPE"]]
-                            
-                            df_det.to_excel(wr, sheet_name=n_h[:31], index=False, startrow=3)
+                        # --- PESTAÑAS DE DETALLE ---
+                        for n_h in st.session_state.dict_hojas.keys():
+                            df_d = pd.DataFrame(st.session_state.analisis_cache[n_h])[["Zona", "VOL", "Traslape"]]
+                            df_d.rename(columns={"Zona":"VR", "VOL":"VOLUMEN", "Traslape":"% TRASLAPE"}, inplace=True)
+                            df_d.to_excel(wr, sheet_name=n_h[:31], index=False, startrow=3)
                             ws_d = wr.sheets[n_h[:31]]
                             ws_d.hide_gridlines(2)
-                            ws_d.set_column('A:A', 40); ws_d.set_column('B:D', 15)
-                            ws_d.write(1, 0, f"DETALLE MENSUAL: {n_h.upper()}", f_title)
-                            
-                            # Formato Semáforo Detalle
-                            rng = f'D5:D{len(df_det)+5}'
-                            ws_d.conditional_format(rng, {'type': 'cell', 'criteria': '<=', 'value': 25, 'format': f_bajo})
-                            ws_d.conditional_format(rng, {'type': 'cell', 'criteria': 'between', 'minimum': 25.01, 'maximum': 50, 'format': f_medio})
-                            ws_d.conditional_format(rng, {'type': 'cell', 'criteria': 'between', 'minimum': 50.01, 'maximum': 75, 'format': f_alto})
-                            ws_d.conditional_format(rng, {'type': 'cell', 'criteria': '>', 'value': 75, 'format': f_crit})
-                            
-                            # Formato Tendencia
-                            rng_t = f'C5:C{len(df_det)+5}'
-                            ws_d.conditional_format(rng_t, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': f_d_green})
-                            ws_d.conditional_format(rng_t, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': f_d_red})
+                            ws_d.write(0, 0, f"DETALLE: {n_h.upper()}", wb.add_format({'bold':True, 'font_size':14, 'font_color':'#1F4E78'}))
+                            ws_d.conditional_format(4, 2, 200, 2, {'type': 'data_bar', 'bar_color': '#63C384'})
                     
-                    else: # Caso otros modos
-                        pd.DataFrame(rep_coords).to_excel(wr, sheet_name="Reporte", index=False)
+                    else: pd.DataFrame(rep_coords).to_excel(wr, sheet_name="Reporte", index=False)
 
-                c2.download_button(label="📊 Descargar Reporte Excel", data=buf.getvalue(), file_name=nombre_archivo, use_container_width=True)
+                c2.download_button(label="📊 Descargar Dashboard Pro", data=buf.getvalue(), file_name=nombre_archivo, use_container_width=True)
