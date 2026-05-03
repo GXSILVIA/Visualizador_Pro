@@ -259,97 +259,108 @@ if st.session_state.get("authentication_status"):
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-            # --- SECCIÓN DE DESCARGAS: DASHBOARD ÁGIL SUPREME (RÉPLICA TOTAL) ---
-            from datetime import datetime
-            import xlsxwriter.utility
+# --- SECCIÓN DE DESCARGAS: DASHBOARD ÁGIL SUPREME (VISTA 1/2 REPLICADA) ---
+from datetime import datetime
+import xlsxwriter.utility
 
-            c1, c2 = st.columns(2)
-            c1.download_button(label="🗺️ Mapa HTML", data=map_html, file_name="mapa.html", use_container_width=True)
+c1, c2 = st.columns(2)
+c1.download_button(label="🗺️ Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower()}.html", use_container_width=True)
+
+if modo != "Polígonos CP":
+    # 1. DEFINICIÓN DEL NOMBRE DEL ARCHIVO (Global para evitar NameError)
+    fecha_hoy = datetime.now().strftime("%d_%m_%Y")
+    nombre_archivo = f"Dashboard_Agil_AMZL_{fecha_hoy}.xlsx"
+    
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
+        wb = wr.book
+        # --- PALETA DE COLORES DASHBOARD ---
+        f_canvas = wb.add_format({'bg_color': '#F3F4F6'}) # Gris de fondo
+        f_card   = wb.add_format({'bg_color': '#FFFFFF', 'border': 1, 'border_color': '#E5E7EB'})
+        f_title  = wb.add_format({'bold': True, 'font_size': 18, 'font_color': '#111827', 'font_name': 'Segoe UI'})
+        f_kpi_lbl = wb.add_format({'font_size': 10, 'bold': True, 'font_color': '#6B7280', 'bg_color': '#FFFFFF', 'align': 'center'})
+        f_kpi_val = wb.add_format({'font_size': 22, 'bold': True, 'font_color': '#1F4E78', 'bg_color': '#FFFFFF', 'align': 'center'})
+        
+        # SEMÁFORO INTENSO (COLORES DE LA IMAGEN)
+        f_v = wb.add_format({'bg_color': '#92D050', 'bold': True, 'border': 1, 'align': 'center', 'num_format': '0.0%'})
+        f_a = wb.add_format({'bg_color': '#FFFF00', 'bold': True, 'border': 1, 'align': 'center', 'num_format': '0.0%'})
+        f_n = wb.add_format({'bg_color': '#FFC000', 'bold': True, 'border': 1, 'align': 'center', 'num_format': '0.0%'})
+        f_r = wb.add_format({'bg_color': '#FF0000', 'font_color': 'white', 'bold': True, 'border': 1, 'align': 'center', 'num_format': '0.0%'})
+
+        if modo == "Crecimiento" and st.session_state.historico_resumen:
+            ws = wb.add_worksheet("RESUMEN")
+            ws.hide_gridlines(2)
+            ws.set_column('A:Z', 16, f_canvas)
             
-            if modo != "Polígonos CP":
-                buf = io.BytesIO()
-                with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
-                    wb = wr.book
-                    # --- PALETA DE COLORES ---
-                    f_canvas = wb.add_format({'bg_color': '#F3F4F6'}) # Fondo gris claro
-                    f_card   = wb.add_format({'bg_color': '#FFFFFF', 'border': 1, 'border_color': '#E5E7EB'})
-                    f_title  = wb.add_format({'bold': True, 'font_size': 18, 'font_color': '#1F2937', 'font_name': 'Segoe UI'})
-                    f_kpi_lbl = wb.add_format({'font_size': 10, 'bold': True, 'font_color': '#6B7280', 'bg_color': '#FFFFFF', 'align': 'center'})
-                    f_kpi_val = wb.add_format({'font_size': 22, 'bold': True, 'font_color': '#111827', 'bg_color': '#FFFFFF', 'align': 'center'})
-                    
-                    # SEMÁFORO INTENSO (AMARILLO PURO #FFFF00)
-                    f_v = wb.add_format({'bg_color': '#92D050', 'bold': True, 'border': 1, 'align': 'center', 'num_format': '0.0%'})
-                    f_a = wb.add_format({'bg_color': '#FFFF00', 'bold': True, 'border': 1, 'align': 'center', 'num_format': '0.0%'})
-                    f_n = wb.add_format({'bg_color': '#FFC000', 'bold': True, 'border': 1, 'align': 'center', 'num_format': '0.0%'})
-                    f_r = wb.add_format({'bg_color': '#FF0000', 'font_color': 'white', 'bold': True, 'border': 1, 'align': 'center', 'num_format': '0.0%'})
+            # --- HEADER (IGUAL A LA IMAGEN) ---
+            ws.merge_range('B2:O3', "Panel de seguimiento de actividades de gestión de VRs (Dashboard)", f_title)
+            
+            ult_h = st.session_state.historico_resumen[-1]
+            df_ult = pd.DataFrame(st.session_state.analisis_cache[ult_h['Mes']])
+            
+            # --- WIDGETS DE KPI (RECTÁNGULOS BLANCOS) ---
+            ws.merge_range('B5:C5', "TOTAL VRs", f_kpi_lbl); ws.merge_range('B6:C7', ult_h['Zonas'], f_kpi_val)
+            ws.merge_range('D5:E5', "TRASLAPE PROM.", f_kpi_lbl); ws.merge_range('D6:E7', ult_h['Prom']/100, wb.add_format({'font_size': 22, 'bold': True, 'font_color': '#1F4E78', 'bg_color': '#FFFFFF', 'align': 'center', 'num_format': '0.0%'}))
+            
+            # --- GRÁFICO DE DONA (TASKS BY STATUS) ---
+            dona = wb.add_chart({'type': 'doughnut'})
+            # Preparar datos para la dona en una zona oculta
+            ws.write_column('AA1', ['Sano', 'Medio', 'Alto', 'Crítico'])
+            status_counts = [
+                len(df_ult[df_ult['Traslape'] <= 25]),
+                len(df_ult[(df_ult['Traslape'] > 25) & (df_ult['Traslape'] <= 50)]),
+                len(df_ult[(df_ult['Traslape'] > 50) & (df_ult['Traslape'] <= 75)]),
+                len(df_ult[df_ult['Traslape'] > 75])
+            ]
+            ws.write_column('AB1', status_counts)
+            
+            dona.add_series({
+                'name':       'Salud VRs',
+                'categories': '=RESUMEN!$AA$1:$AA$4',
+                'values':     '=RESUMEN!$AB$1:$AB$4',
+                'points': [
+                    {'fill': {'color': '#92D050'}}, # Verde
+                    {'fill': {'color': '#FFFF00'}}, # Amarillo
+                    {'fill': {'color': '#FFC000'}}, # Naranja
+                    {'fill': {'color': '#FF0000'}}, # Rojo
+                ],
+                'data_labels': {'percentage': True, 'position': 'center'},
+            })
+            dona.set_title({'name': 'Distribución por Estatus (Actual)'})
+            dona.set_chartarea({'fill': {'color': '#FFFFFF'}, 'border': {'none': True}})
+            ws.insert_chart('G5', dona, {'x_scale': 1.1, 'y_scale': 0.8})
 
-                    if modo == "Crecimiento":
-                        ws = wb.add_worksheet("RESUMEN")
-                        ws.hide_gridlines(2)
-                        ws.set_column('A:Z', 15, f_canvas)
-                        
-                        # 1. ENCABEZADO (Fila superior de la imagen)
-                        ws.merge_range('B2:M3', "Panel de seguimiento de actividades de gestión de VRs", f_title)
-                        
-                        ult_h = st.session_state.historico_resumen[-1]
-                        # KPI CARDS (Rectángulos blancos superiores)
-                        cards = [("Total VRs", ult_h['Zonas'], 'B5:C7'), 
-                                 ("Traslape Promedio", f"{ult_h['Prom']:.1f}%", 'E5:F7'),
-                                 ("Crecimiento Mes", f"+{ult_h['Zonas']-st.session_state.historico_resumen[0]['Zonas']}", 'H5:I7')]
-                        
-                        for label, val, range_c in cards:
-                            ws.merge_range(range_c, "", f_card)
-                            ws.write(range_c.split(':')[0], label, f_kpi_lbl)
-                            ws.write(range_c.split(':')[1], val, f_kpi_val)
+            # --- TABLA DE TENDENCIA VERTICAL (HISTÓRICO) ---
+            col_idx = 1
+            for i, h_res in enumerate(st.session_state.historico_resumen):
+                df_m = pd.DataFrame(st.session_state.analisis_cache[h_res['Mes']])
+                t = len(df_m) or 1
+                
+                ws.write(20, col_idx, h_res['Mes'].upper(), wb.add_format({'bg_color': '#1F4E78', 'font_color': 'white', 'bold': True, 'align': 'center', 'border': 1}))
+                ws.write(21, col_idx, h_res['Prom']/100, wb.add_format({'bg_color': '#FFFFFF', 'bold': True, 'align': 'center', 'num_format': '0.0%', 'border': 1}))
+                
+                # Bloques por nivel
+                r_r = 23
+                for n_nom, n_min, n_max, n_fmt in [("B",0,25,f_v), ("M",25,50,f_a), ("A",50,75,f_n), ("C",75,100,f_r)]:
+                    mask = (df_m['Traslape'] <= 25) if n_nom=="B" else ((df_m['Traslape']>n_min)&(df_m['Traslape']<=n_max))
+                    sub = df_m[mask]; count = len(sub); v_p = sub['VOL'].mean() if count > 0 else 0
+                    ws.write(r_r, col_idx, count/t, n_fmt)
+                    ws.write(r_r+1, col_idx, f"Vol. Prom: {int(v_p)}", wb.add_format({'italic': True, 'font_size': 8, 'align': 'center', 'bg_color': '#FFFFFF'}))
+                    r_r += 3
+                col_idx += 1
 
-                        # 2. GRÁFICAS CENTRALES (Como en la imagen)
-                        # Dona de Estatus (Lado izquierdo)
-                        donut = wb.add_chart({'type': 'doughnut'})
-                        ws.write_column('AA1', ['Bajo', 'Medio', 'Alto', 'Crítico'])
-                        df_u = pd.DataFrame(st.session_state.analisis_cache[ult_h['Mes']])
-                        v_d = [len(df_u[df_u['Traslape']<=25]), len(df_u[(df_u['Traslape']>25)&(df_u['Traslape']<=50)]), 
-                               len(df_u[(df_u['Traslape']>50)&(df_u['Traslape']<=75)]), len(df_u[df_u['Traslape']>75])]
-                        ws.write_column('AB1', v_d)
-                        donut.add_series({'categories': '=RESUMEN!$AA$1:$AA$4', 'values': '=RESUMEN!$AB$1:$AB$4',
-                                         'points': [{'fill':{'color':'#92D050'}}, {'fill':{'color':'#FFFF00'}}, {'fill':{'color':'#FFC000'}}, {'fill':{'color':'#FF0000'}}]})
-                        donut.set_title({'name': 'Salud Operativa Actual'})
-                        ws.insert_chart('B9', donut, {'x_scale': 0.9, 'y_scale': 0.9})
+            # --- PESTAÑAS DE DETALLE CON BARRAS DE DATOS ---
+            for n_h in st.session_state.dict_hojas.keys():
+                df_d = pd.DataFrame(st.session_state.analisis_cache[n_h])[["Zona", "VOL", "Traslape"]]
+                df_d.rename(columns={"Zona":"VR", "VOL":"VOLUMEN", "Traslape":"% TRASLAPE"}, inplace=True)
+                df_d.to_excel(wr, sheet_name=n_h[:31], index=False, startrow=4)
+                ws_d = wr.sheets[n_h[:31]]
+                ws_d.hide_gridlines(2)
+                ws_d.write(0, 0, f"DETALLE DE ACTIVIDAD: {n_h.upper()}", wb.add_format({'bold':True, 'font_size':14, 'font_color':'#1F4E78'}))
+                # Barra de datos (Igual a la columna Completion de la imagen)
+                ws_d.conditional_format(5, 2, 200, 2, {'type': 'data_bar', 'bar_color': '#10B981', 'bar_solid': True})
 
-                        # Barras de Crecimiento (Centro)
-                        bar_chart = wb.add_chart({'type': 'column'})
-                        col_m = xlsxwriter.utility.xl_col_to_name(len(st.session_state.historico_resumen))
-                        bar_chart.add_series({'name': 'VRs x Mes', 'values': f'=RESUMEN!$B$26:${col_m}$26', 'fill': {'color': '#1F4E78'}})
-                        ws.insert_chart('F9', bar_chart, {'x_scale': 1.1, 'y_scale': 0.9})
-
-                        # 3. TABLA VERTICAL DE TENDENCIAS (Parte inferior)
-                        col_idx = 1
-                        for i, h_res in enumerate(st.session_state.historico_resumen):
-                            df_m = pd.DataFrame(st.session_state.analisis_cache[h_res['Mes']])
-                            t = len(df_m) or 1
-                            ws.write(22, col_idx, h_res['Mes'].upper(), wb.add_format({'bg_color': '#1F4E78', 'font_color': 'white', 'bold': True, 'align': 'center', 'border': 1}))
-                            ws.write(23, col_idx, h_res['Prom']/100, wb.add_format({'bg_color': '#FFFFFF', 'bold': True, 'align': 'center', 'num_format': '0.0%', 'border': 1}))
-                            
-                            # Bloques de Niveles
-                            r_r = 25
-                            for n_nom, n_min, n_max, n_fmt in [("B",0,25,f_v), ("M",25,50,f_a), ("A",50,75,f_n), ("C",75,100,f_r)]:
-                                mask = (df_m['Traslape'] <= 25) if n_nom=="B" else ((df_m['Traslape']>n_min)&(df_m['Traslape']<=n_max))
-                                sub = df_m[mask]; count = len(sub); v_p = sub['VOL'].mean() if count > 0 else 0
-                                ws.write(r_r, col_idx, count/t, n_fmt)
-                                ws.write(r_r+1, col_idx, f"Vol. Prom: {int(v_p)}", wb.add_format({'italic': True, 'font_size': 8, 'align': 'center', 'bg_color': '#FFFFFF'}))
-                                r_r += 3
-                            ws.write(25, col_idx, t, wb.add_format({'hidden': True})) # Datos ocultos para gráfica
-                            col_idx += 1
-
-                        # --- PESTAÑAS DE DETALLE (FIDELIDAD TOTAL) ---
-                        for n_h in st.session_state.dict_hojas.keys():
-                            df_d = pd.DataFrame(st.session_state.analisis_cache[n_h])[["Zona", "VOL", "Traslape"]]
-                            df_d.rename(columns={"Zona":"VR", "VOL":"VOLUMEN", "Traslape":"% TRASLAPE"}, inplace=True)
-                            df_d.to_excel(wr, sheet_name=n_h[:31], index=False, startrow=3)
-                            ws_d = wr.sheets[n_h[:31]]
-                            ws_d.hide_gridlines(2)
-                            ws_d.write(0, 0, f"DETALLE: {n_h.upper()}", wb.add_format({'bold':True, 'font_size':14, 'font_color':'#1F4E78'}))
-                            ws_d.conditional_format(4, 2, 200, 2, {'type': 'data_bar', 'bar_color': '#10B981', 'bar_solid': True})
-                    
-                    else: pd.DataFrame(rep_coords).to_excel(wr, sheet_name="Reporte", index=False)
-
-                c2.download_button(label="📊 Descargar Dashboard Pro v8.5", data=buf.getvalue(), file_name=nombre_archivo, use_container_width=True)
+        else: # Otros modos o sin datos
+            pd.DataFrame(rep_coords).to_excel(wr, sheet_name="Reporte", index=False)
+            
+    c2.download_button(label="📊 Descargar Dashboard Pro v8.5", data=buf.getvalue(), file_name=nombre_archivo, use_container_width=True)
