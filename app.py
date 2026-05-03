@@ -259,112 +259,118 @@ if st.session_state.get("authentication_status"):
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-            # --- RENDERIZADO DEL MAPA ---
-            map_html = m.get_root().render()
-            components.html(map_html, height=450)
+        # --- SECCIÓN DE DESCARGAS (VERSIÓN DASHBOARD ELITE FINAL SUPREME) ---
+        from datetime import datetime
+        import xlsxwriter.utility
+        import unicodedata
 
-            # --- SECCIÓN DE DESCARGAS: DASHBOARD ELITE FINAL ---
-            from datetime import datetime
-            import xlsxwriter.utility
+        def limpiar_texto(t):
+            if not isinstance(t, str): return str(t)
+            t = unicodedata.normalize('NFKD', t).encode('ASCII', 'ignore').decode('ASCII')
+            return t.strip().upper()
 
-            st.write("---")
-            c_desc1, c_desc2 = st.columns(2)
+        st.write("---")
+        c_desc1, c_desc2 = st.columns(2)
+
+        # 1. BOTÓN DE MAPA (Renderizado Único para evitar duplicados)
+        map_html = m.get_root().render()
+        c_desc1.download_button(label="🗺️ Descargar Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower().replace(' ','_')}.html", use_container_width=True)
+
+        # 2. LÓGICA DE EXCEL TIPO DASHBOARD PROFESIONAL
+        fecha_hoy = datetime.now().strftime("%d_%m_%Y")
+        nombre_archivo = f"REPORTE_{fecha_hoy}.xlsx"
+        buf = io.BytesIO()
+        
+        with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
+            wb = wr.book
+            # --- FORMATOS DE DISEÑO (ESTILO DASHBOARD ÁGIL) ---
+            f_canvas = wb.add_format({'bg_color': '#F3F4F6'}) # Fondo gris claro
+            f_card   = wb.add_format({'bg_color': '#FFFFFF', 'border': 1, 'border_color': '#D1D5DB'})
+            f_header = wb.add_format({'bold': True, 'bg_color': '#1F4E78', 'font_color': 'white', 'border': 1, 'align': 'center'})
+            f_title  = wb.add_format({'bold': True, 'font_size': 18, 'font_color': '#111827', 'font_name': 'Segoe UI'})
+            f_kpi_lbl = wb.add_format({'font_size': 10, 'bold': True, 'font_color': '#6B7280', 'bg_color': '#FFFFFF', 'align': 'center'})
+            f_kpi_val = wb.add_format({'font_size': 22, 'bold': True, 'font_color': '#1F4E78', 'bg_color': '#FFFFFF', 'align': 'center'})
             
-            # Botón de Mapa HTML
-            c_desc1.download_button(label="🗺️ Descargar Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower().replace(' ','_')}.html", use_container_width=True)
-
-            # Configuración de nombres solicitada
-            fecha_hoy = datetime.now().strftime("%d_%m_%Y")
-            nombre_archivo_excel = f"REPORTE_{fecha_hoy}.xlsx"
+            # SEMÁFORO INTENSO (AMARILLO PURO #FFFF00)
+            f_v = wb.add_format({'bg_color': '#92D050', 'bold': True, 'border': 1, 'num_format': '0.0%', 'align': 'center'})
+            f_a = wb.add_format({'bg_color': '#FFFF00', 'bold': True, 'border': 1, 'num_format': '0.0%', 'align': 'center'})
+            f_n = wb.add_format({'bg_color': '#FFC000', 'bold': True, 'border': 1, 'num_format': '0.0%', 'align': 'center'})
+            f_r = wb.add_format({'bg_color': '#FF0000', 'font_color': 'white', 'bold': True, 'border': 1, 'num_format': '0.0%', 'align': 'center'})
             
-            buf = io.BytesIO()
-            with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
-                wb = wr.book
-                # --- FORMATOS DE DISEÑO DASHBOARD ---
-                f_canvas = wb.add_format({'bg_color': '#F3F4F6'}) # Fondo gris claro
-                f_card   = wb.add_format({'bg_color': '#FFFFFF', 'border': 1, 'border_color': '#D1D5DB'})
-                f_title  = wb.add_format({'bold': True, 'font_size': 18, 'font_color': '#111827', 'font_name': 'Segoe UI'})
-                f_kpi_lbl = wb.add_format({'font_size': 10, 'bold': True, 'font_color': '#6B7280', 'bg_color': '#FFFFFF', 'align': 'center'})
-                f_kpi_val = wb.add_format({'font_size': 22, 'bold': True, 'font_color': '#1F4E78', 'bg_color': '#FFFFFF', 'align': 'center'})
+            f_delta_up = wb.add_format({'font_color': '#FF0000', 'bold': True, 'align': 'center', 'font_size': 9, 'bg_color': '#FFFFFF'})
+            f_delta_dn = wb.add_format({'font_color': '#00B050', 'bold': True, 'align': 'center', 'font_size': 9, 'bg_color': '#FFFFFF'})
+
+            if modo == "Crecimiento" and st.session_state.historico_resumen:
+                ws = wb.add_worksheet("RESUMEN")
+                ws.hide_gridlines(2)
+                ws.set_column('A:Z', 18, f_canvas)
                 
-                # SEMÁFORO INTENSO (AMARILLO PURO #FFFF00)
-                f_v = wb.add_format({'bg_color': '#92D050', 'bold': True, 'border': 1, 'num_format': '0.0%', 'align': 'center'})
-                f_a = wb.add_format({'bg_color': '#FFFF00', 'bold': True, 'border': 1, 'align': 'center', 'num_format': '0.0%'})
-                f_n = wb.add_format({'bg_color': '#FFC000', 'bold': True, 'border': 1, 'align': 'center', 'num_format': '0.0%'})
-                f_r = wb.add_format({'bg_color': '#FF0000', 'font_color': 'white', 'bold': True, 'border': 1, 'num_format': '0.0%', 'align': 'center'})
+                # ENCABEZADO Y TARJETAS KPI (Widgets blancos)
+                ws.merge_range('B2:M3', "Panel de Seguimiento Operativo - Dashboard de VRs", f_title)
                 
-                f_delta_up = wb.add_format({'font_color': '#FF0000', 'bold': True, 'align': 'center', 'font_size': 9, 'bg_color': '#FFFFFF'})
-                f_delta_dn = wb.add_format({'font_color': '#00B050', 'bold': True, 'align': 'center', 'font_size': 9, 'bg_color': '#FFFFFF'})
+                ult_h = st.session_state.historico_resumen[-1]
+                ws.merge_range('B5:C5', "TOTAL VRs", f_kpi_lbl); ws.merge_range('B6:C7', ult_h['Zonas'], f_kpi_val)
+                ws.merge_range('D5:E5', "TRASLAPE PROM.", f_kpi_lbl); ws.merge_range('D6:E7', ult_h['Prom']/100, wb.add_format({'font_size': 22, 'bold': True, 'font_color': '#1F4E78', 'bg_color': '#FFFFFF', 'align': 'center', 'num_format': '0.0%'}))
+                
+                # GRÁFICA DE DONA (SALUD OPERATIVA ACTUAL)
+                dona = wb.add_chart({'type': 'doughnut'})
+                ws.write_column('AA1', ['Bajo', 'Medio', 'Alto', 'Crítico'])
+                df_ult = pd.DataFrame(st.session_state.analisis_cache[ult_h['Mes']])
+                v_dona = [len(df_ult[df_ult['Traslape']<=25]), len(df_ult[(df_ult['Traslape']>25)&(df_ult['Traslape']<=50)]), 
+                          len(df_ult[(df_ult['Traslape']>50)&(df_ult['Traslape']<=75)]), len(df_ult[df_ult['Traslape']>75])]
+                ws.write_column('AB1', v_dona)
+                dona.add_series({'categories': '=RESUMEN!$AA$1:$AA$4', 'values': '=RESUMEN!$AB$1:$AB$4',
+                                 'points': [{'fill':{'color':'#92D050'}}, {'fill':{'color':'#FFFF00'}}, {'fill':{'color':'#FFC000'}}, {'fill':{'color':'#FF0000'}}]})
+                ws.insert_chart('G5', dona, {'x_scale': 1.1, 'y_scale': 0.8})
 
-                if modo == "Crecimiento" and st.session_state.historico_resumen:
-                    ws = wb.add_worksheet("RESUMEN")
-                    ws.hide_gridlines(2)
-                    ws.set_column('A:Z', 18, f_canvas)
+                # TABLA DE TENDENCIA (DESGLOSE POR MESES)
+                col_idx = 1
+                for i, h_res in enumerate(st.session_state.historico_resumen):
+                    df_m = pd.DataFrame(st.session_state.analisis_cache[h_res['Mes']])
+                    t_m = len(df_m) or 1
+                    ws.write(11, col_idx, h_res['Mes'].upper(), f_header)
+                    ws.write(12, col_idx, h_res['Prom']/100, wb.add_format({'bg_color': '#FFFFFF', 'bold': True, 'align': 'center', 'num_format': '0.0%', 'border': 1}))
                     
-                    # 1. ENCABEZADO Y TARJETAS (WIDGETS)
-                    ws.merge_range('B2:M3', "Panel de Seguimiento Operativo - Dashboard de VRs", f_title)
+                    if i > 0:
+                        d_t = h_res['Prom'] - st.session_state.historico_resumen[i-1]['Prom']
+                        ws.write(13, col_idx, f"{'▲' if d_t > 0 else '▼'} {abs(round(d_t,1))}% vs ant.", f_delta_up if d_t > 0 else f_delta_dn)
+
+                    r_r = 15
+                    for n_min, n_max, n_fmt in [(0,25,f_v), (25,50,f_a), (50,75,f_n), (75,100,f_r)]:
+                        msk = (df_m['Traslape'] <= 25) if n_min==0 else ((df_m['Traslape']>n_min)&(df_m['Traslape']<=n_max))
+                        sub = df_m[msk]; cnt = len(sub); v_p = sub['VOL'].mean() if cnt > 0 else 0
+                        ws.write(r_r, col_idx, cnt/t_m, n_fmt)
+                        ws.write(r_r+1, col_idx, f"Vol. Prom: {int(v_p)}", wb.add_format({'italic': True, 'font_size': 8, 'align': 'center', 'bg_color': '#FFFFFF'}))
+                        r_r += 3
+                    col_idx += 1
+
+                # PESTAÑAS DE DETALLE (CON DELTAS Y BARRAS DE DATOS)
+                for idx_m, n_h in enumerate(st.session_state.dict_hojas.keys()):
+                    df_d = pd.DataFrame(st.session_state.analisis_cache[n_h]).copy()
+                    df_ant = {limpiar_texto(r['Zona']): r for r in st.session_state.analisis_cache[list(st.session_state.dict_hojas.keys())[idx_m-1]]} if idx_m > 0 else {}
+
+                    def get_d(row):
+                        z = limpiar_texto(row['Zona'])
+                        if z in df_ant:
+                            dv, dt = int(row['VOL'] - df_ant[z]['VOL']), row['Traslape'] - df_ant[z]['Traslape']
+                            return f"{'▲' if dv>0 else '▼'} {abs(dv)}", f"{'▲' if dt>0 else '▼'} {abs(round(dt,1))}%"
+                        return "NUEVO", "NUEVO"
+
+                    df_d[['Δ VOL', 'Δ TRAS']] = df_d.apply(lambda r: pd.Series(get_d(r)), axis=1)
+                    df_exp = df_d[["Zona", "VOL", "Δ VOL", "Traslape", "Δ TRAS"]]
+                    df_exp.columns = ["VR", "VOLUMEN", "Δ VOL", "% TRASLAPE", "Δ TRASLAPE"]
+                    df_exp.to_excel(wr, sheet_name=n_h[:31], index=False, startrow=4)
                     
-                    ult_h = st.session_state.historico_resumen[-1]
-                    ws.merge_range('B5:C5', "TOTAL VRs", f_kpi_lbl); ws.merge_range('B6:C7', ult_h['Zonas'], f_kpi_val)
-                    ws.merge_range('D5:E5', "TRASLAPE PROM.", f_kpi_lbl); ws.merge_range('D6:E7', ult_h['Prom']/100, wb.add_format({'font_size': 22, 'bold': True, 'font_color': '#1F4E78', 'bg_color': '#FFFFFF', 'align': 'center', 'num_format': '0.0%'}))
-                    
-                    # 2. GRÁFICA DE DONA (SALUD OPERATIVA ACTUAL)
-                    dona = wb.add_chart({'type': 'doughnut'})
-                    ws.write_column('AA1', ['Bajo', 'Medio', 'Alto', 'Crítico'])
-                    df_ult = pd.DataFrame(st.session_state.analisis_cache[ult_h['Mes']])
-                    v_dona = [len(df_ult[df_ult['Traslape']<=25]), len(df_ult[(df_ult['Traslape']>25)&(df_ult['Traslape']<=50)]), 
-                              len(df_ult[(df_ult['Traslape']>50)&(df_ult['Traslape']<=75)]), len(df_ult[df_ult['Traslape']>75])]
-                    ws.write_column('AB1', v_dona)
-                    dona.add_series({'categories': '=RESUMEN!$AA$1:$AA$4', 'values': '=RESUMEN!$AB$1:$AB$4',
-                                     'points': [{'fill':{'color':'#92D050'}}, {'fill':{'color':'#FFFF00'}}, {'fill':{'color':'#FFC000'}}, {'fill':{'color':'#FF0000'}}]})
-                    ws.insert_chart('G5', dona, {'x_scale': 1.1, 'y_scale': 0.8})
+                    ws_det = wr.sheets[n_h[:31]]
+                    ws_det.hide_gridlines(2)
+                    ws_det.write(0, 0, f"ANÁLISIS DE ACTIVIDAD: {n_h.upper()}", wb.add_format({'bold':True, 'font_size':14, 'font_color':'#1F4E78'}))
+                    ws_det.set_column('A:A', 35); ws_det.set_column('B:E', 15)
+                    ws_det.conditional_format(5, 3, 200, 3, {'type': 'data_bar', 'bar_color': '#63C384', 'bar_solid': True})
 
-                    # 3. TABLA DE TENDENCIA (DESGLOSE POR MESES)
-                    col_idx = 1
-                    for i, h_res in enumerate(st.session_state.historico_resumen):
-                        df_m = pd.DataFrame(st.session_state.analisis_cache[h_res['Mes']])
-                        t_m = len(df_m) or 1
-                        ws.write(11, col_idx, h_res['Mes'].upper(), wb.add_format({'bg_color': '#1F4E78', 'font_color': 'white', 'bold': True, 'align': 'center', 'border': 1}))
-                        ws.write(12, col_idx, h_res['Prom']/100, wb.add_format({'bg_color': '#FFFFFF', 'bold': True, 'align': 'center', 'num_format': '0.0%', 'border': 1}))
-                        
-                        if i > 0:
-                            d_t = h_res['Prom'] - st.session_state.historico_resumen[i-1]['Prom']
-                            ws.write(13, col_idx, f"{'▲' if d_t > 0 else '▼'} {abs(round(d_t,1))}% vs ant.", f_delta_up if d_t > 0 else f_delta_dn)
-
-                        r_r = 15
-                        for n_min, n_max, n_fmt in [(0,25,f_v), (25,50,f_a), (50,75,f_n), (75,100,f_r)]:
-                            msk = (df_m['Traslape'] <= 25) if n_min==0 else ((df_m['Traslape']>n_min)&(df_m['Traslape']<=n_max))
-                            sub = df_m[msk]; cnt = len(sub); v_p = sub['VOL'].mean() if cnt > 0 else 0
-                            ws.write(r_r, col_idx, cnt/t_m, n_fmt)
-                            ws.write(r_r+1, col_idx, f"Vol. Prom: {int(v_p)}", wb.add_format({'italic': True, 'font_size': 8, 'align': 'center', 'bg_color': '#FFFFFF'}))
-                            r_r += 3
-                        col_idx += 1
-
-                    # 4. PESTAÑAS DE DETALLE (CON DELTAS Y BARRAS DE DATOS)
-                    for idx_m, n_h in enumerate(st.session_state.dict_hojas.keys()):
-                        df_d = pd.DataFrame(st.session_state.analisis_cache[n_h])
-                        df_ant = {limpiar_texto(r['Zona']): r for r in st.session_state.analisis_cache[list(st.session_state.dict_hojas.keys())[idx_m-1]]} if idx_m > 0 else {}
-
-                        def get_d(row):
-                            z = limpiar_texto(row['Zona'])
-                            if z in df_ant:
-                                dv, dt = int(row['VOL'] - df_ant[z]['VOL']), row['Traslape'] - df_ant[z]['Traslape']
-                                return f"{'▲' if dv>0 else '▼'} {abs(dv)}", f"{'▲' if dt>0 else '▼'} {abs(round(dt,1))}%"
-                            return "NUEVO", "NUEVO"
-
-                        df_d[['Δ VOL', 'Δ TRAS']] = df_d.apply(lambda r: pd.Series(get_d(r)), axis=1)
-                        df_exp = df_d[["Zona", "VOL", "Δ VOL", "Traslape", "Δ TRAS"]]
-                        df_exp.to_excel(wr, sheet_name=n_h[:31], index=False, startrow=4)
-                        
-                        ws_det = wr.sheets[n_h[:31]]
-                        ws_det.hide_gridlines(2)
-                        ws_det.write(0, 0, f"ANÁLISIS DE ACTIVIDAD: {n_h.upper()}", wb.add_format({'bold':True, 'font_size':14, 'font_color':'#1F4E78'}))
-                        ws_det.set_column('A:A', 35); ws_det.set_column('B:E', 15)
-                        ws_det.conditional_format(5, 3, 200, 3, {'type': 'data_bar', 'bar_color': '#63C384', 'bar_solid': True})
-
-                else:
-                    df_base = st.session_state.df_datos if st.session_state.df_datos is not None else pd.DataFrame(rep_coords)
-                    df_base.to_excel(wr, sheet_name="Reporte", index=False)
-                    
-            # Botón con el nombre solicitado
-            c_desc2.download_button(label="📊 DESCARGAR REPORTE", data=buf.getvalue(), file_name=nombre_archivo_excel, use_container_width=True)
+            else:
+                # Caso para otros modos que no sean Crecimiento
+                df_base = st.session_state.df_datos if st.session_state.df_datos is not None else pd.DataFrame(rep_coords)
+                df_base.to_excel(wr, sheet_name="Reporte", index=False)
+        
+        # Botón de Descarga Unificado
+        c_desc2.download_button(label="📊 DESCARGAR REPORTE", data=buf.getvalue(), file_name=nombre_archivo, use_container_width=True)
