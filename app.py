@@ -259,7 +259,7 @@ if st.session_state.get("authentication_status"):
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-        # --- SECCIÓN DE DESCARGAS: DASHBOARD HORIZONTAL SUPREME CON GRÁFICA DE COMPOSICIÓN ---
+        # --- SECCIÓN DE DESCARGAS: DASHBOARD ESTRATÉGICO FINAL (VERSIÓN CORREGIDA 100%) ---
         from datetime import datetime
         import xlsxwriter.utility
         import unicodedata
@@ -272,11 +272,11 @@ if st.session_state.get("authentication_status"):
         st.write("---")
         c_desc1, c_desc2 = st.columns(2)
 
-        # 1. RENDERIZADO ÚNICO DEL MAPA
+        # 1. RENDERIZADO DEL MAPA
         map_html = m.get_root().render()
         c_desc1.download_button(label="🗺️ Descargar Mapa HTML", data=map_html, file_name=f"mapa_{modo.lower().replace(' ','_')}.html", use_container_width=True)
 
-        # 2. GENERACIÓN DEL EXCEL DASHBOARD ELITE
+        # 2. GENERACIÓN DEL EXCEL DASHBOARD
         fecha_hoy = datetime.now().strftime("%d_%m_%Y")
         nombre_archivo_excel = f"REPORTE_{fecha_hoy}.xlsx"
         buf = io.BytesIO()
@@ -345,19 +345,31 @@ if st.session_state.get("authentication_status"):
                 # --- MINIGRÁFICOS (SPARKLINES) ---
                 ws_res.write(4, col_idx, "TENDENCIA", f_mes_h)
                 lc_let = xlsxwriter.utility.xl_col_to_name(col_idx - 1)
+                # Filas con minigráfico: Traslape(5), %Bajo(7), %Medio(11), %Alto(15), %Crit(19), Total(23)
                 for r_spark in [5, 7, 11, 15, 19, 23]:
-                    ws_res.add_sparkline(r_spark, col_idx, {'range': f'RESUMEN!B{r_spark+1}:{lc_let}{r_spark+1}', 'type': 'line', 'style': 18})
+                    ws_res.add_sparkline(r_spark, col_idx, {
+                        'range': f'RESUMEN!B{r_spark+1}:{lc_let}{r_spark+1}', 
+                        'type': 'line', 
+                        'style': 18
+                    })
 
                 # --- GRÁFICA 1: CRECIMIENTO VS SALUD (DOBLE EJE) ---
                 chart_dual = wb.add_chart({'type': 'column'})
                 line_axis  = wb.add_chart({'type': 'line'})
                 chart_dual.add_series({
-                    'name': 'Total VRs', 'categories': f'=RESUMEN!$B$5:${lc_let}$5', 'values': f'=RESUMEN!$B$24:${lc_let}$24', 
-                    'fill': {'color': '#DDEBF7'}, 'data_labels': {'value': True, 'position': 'inside_base'}
+                    'name': 'Total VRs', 
+                    'categories': f'=RESUMEN!$B$5:${lc_let}$5', 
+                    'values': f'=RESUMEN!$B$24:${lc_let}$24', 
+                    'fill': {'color': '#DDEBF7'}, 
+                    'data_labels': {'value': True, 'position': 'inside_base'}
                 })
                 line_axis.add_series({
-                    'name': 'Traslape %', 'values': f'=RESUMEN!$B$6:${lc_let}$6', 'y2_axis': True, 
-                    'line': {'color': '#1F4E78', 'width': 2}, 'marker': {'type': 'circle'}, 'data_labels': {'value': True, 'position': 'above', 'num_format': '0.0%'}
+                    'name': 'Traslape %', 
+                    'values': f'=RESUMEN!$B$6:${lc_let}$6', 
+                    'y2_axis': True, 
+                    'line': {'color': '#1F4E78', 'width': 2}, 
+                    'marker': {'type': 'circle'}, 
+                    'data_labels': {'value': True, 'position': 'above', 'num_format': '0.0%'}
                 })
                 chart_dual.combine(line_axis); ws_res.insert_chart('B26', chart_dual, {'x_scale': 1.4, 'y_scale': 1.1})
 
@@ -365,8 +377,11 @@ if st.session_state.get("authentication_status"):
                 chart_stack = wb.add_chart({'type': 'column', 'subtype': 'percent_stacked'})
                 for n_lbl, n_row, n_clr in [('Bajo', 7, '#92D050'), ('Medio', 11, '#FFFF00'), ('Alto', 15, '#FFC000'), ('Crítico', 19, '#FF0000')]:
                     chart_stack.add_series({
-                        'name': n_lbl, 'categories': f'=RESUMEN!$B$5:${lc_let}$5', 'values': f'=RESUMEN!$B${n_row+1}:${lc_let}${n_row+1}',
-                        'fill': {'color': n_clr}, 'border': {'color': '#FFFFFF', 'width': 0.5}
+                        'name': n_lbl, 
+                        'categories': f'=RESUMEN!$B$5:${lc_let}$5', 
+                        'values': f'=RESUMEN!$B${n_row+1}:${lc_let}${n_row+1}',
+                        'fill': {'color': n_clr}, 
+                        'border': {'color': '#FFFFFF', 'width': 0.5}
                     })
                 chart_stack.set_title({'name': 'DISTRIBUCIÓN DE RIESGO (%)'})
                 chart_stack.set_legend({'position': 'right'})
@@ -389,13 +404,15 @@ if st.session_state.get("authentication_status"):
                         z_l = limpiar_texto(r['Zona'])
                         if z_l in df_ant:
                             dv, dt = int(r['VOL'] - df_ant[z_l]['VOL']), round(r['Traslape'] - df_ant[z_l]['Traslape'], 1)
-                            # Volumen: Verde si sube (+)
+                            # Delta Volumen (Verde si sube)
                             ws_det.write(r_n, 2, f"▲ +{dv}.0" if dv > 0 else (f"▼ {abs(dv)}.0" if dv < 0 else "▼ SIN CAMBIO"), 
                                          wb.add_format({'font_color':'#00B050' if dv > 0 else '#FF0000' if dv < 0 else '#000', 'bold':True, 'align':'right'}))
-                            # Traslape: Rojo si sube (+)
+                            # Delta Traslape (Rojo si sube)
                             ws_det.write(r_n, 4, f"▲ {dt}%" if dt > 0 else (f"▼ {abs(dt)}%" if dt < 0 else "▼ SIN CAMBIO"), 
                                          wb.add_format({'font_color':'#FF0000' if dt > 0 else '#00B050' if dt < 0 else '#000', 'bold':True, 'align':'right'}))
-                        else: [ws_det.write(r_n, c, "▼ NUEVO", wb.add_format({'align':'right', 'bold':True})) for c in [2, 4]]
+                        else:
+                            ws_det.write(r_n, 2, "▼ NUEVO", wb.add_format({'align':'right', 'bold':True}))
+                            ws_det.write(r_n, 4, "▼ NUEVO", wb.add_format({'align':'right', 'bold':True}))
 
                         t_v = r['Traslape'] / 100
                         fmt_f = f_v if r['Traslape'] <= 25 else (f_a if r['Traslape'] <= 50 else (f_n if r['Traslape'] <= 75 else f_r))
