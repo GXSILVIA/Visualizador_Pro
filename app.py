@@ -259,7 +259,7 @@ if st.session_state.get("authentication_status"):
                     st.subheader("📋 Análisis Operativo")
                     st.dataframe(pd.DataFrame(rep_coords), use_container_width=True, hide_index=True)
 
-            # --- SECCIÓN DE DESCARGAS (VERSIÓN FINAL SUPREME REESTABLECIDA) ---
+            # --- SECCIÓN DE DESCARGAS UNIFICADA (DASHBOARD EDITION) ---
             from datetime import datetime
             import xlsxwriter.utility
             import unicodedata
@@ -274,77 +274,100 @@ if st.session_state.get("authentication_status"):
             
             if modo != "Polígonos CP":
                 fecha_hoy = datetime.now().strftime("%d_%m_%Y")
-                nombre_archivo = f"Reporte_{fecha_hoy}.xlsx"
+                nombre_archivo = f"Reporte_Dashboard_{fecha_hoy}.xlsx"
                 buf = io.BytesIO()
                 
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
                     wb = wr.book
-                    f_header = wb.add_format({'bold': True, 'bg_color': '#1F4E78', 'font_color': 'white', 'border': 1, 'align': 'center'})
-                    f_sub    = wb.add_format({'font_size': 10, 'color': '#595959', 'bold': True})
-                    f_perc   = wb.add_format({'num_format': '0.0%', 'bold': True, 'align': 'right', 'font_size': 11})
-                    f_bajo   = wb.add_format({'bg_color': '#00B050', 'font_color': 'white', 'bold': True, 'num_format': '0.0', 'border': 1, 'align': 'right'})
-                    f_medio  = wb.add_format({'bg_color': '#FFFF00', 'font_color': 'black', 'bold': True, 'num_format': '0.0', 'border': 1, 'align': 'right'})
-                    f_alto   = wb.add_format({'bg_color': '#FFC000', 'font_color': 'black', 'bold': True, 'num_format': '0.0', 'border': 1, 'align': 'right'})
-                    f_crit   = wb.add_format({'bg_color': '#FF0000', 'font_color': 'white', 'bold': True, 'num_format': '0.0', 'border': 1, 'align': 'right'})
-                    f_d_red  = wb.add_format({'font_color': '#C00000', 'bold': True, 'align': 'center'})
-                    f_d_green= wb.add_format({'font_color': '#00B050', 'bold': True, 'align': 'center'})
+                    # --- DEFINICIÓN DE FORMATOS Y SEMÁFORO ---
+                    f_bg      = wb.add_format({'bg_color': '#F2F2F2'})
+                    f_title   = wb.add_format({'bold': True, 'font_size': 16, 'font_color': '#1F4E78', 'valign': 'vcenter'})
+                    f_header  = wb.add_format({'bold': True, 'bg_color': '#1F4E78', 'font_color': 'white', 'border': 1, 'align': 'center'})
+                    f_sub     = wb.add_format({'font_size': 9, 'color': '#595959', 'bold': True, 'bg_color': '#FFFFFF', 'align': 'center'})
+                    f_perc    = wb.add_format({'num_format': '0.0%', 'bold': True, 'align': 'center', 'font_size': 13, 'bg_color': '#FFFFFF'})
+                    f_vol_box = wb.add_format({'font_size': 9, 'italic': True, 'bg_color': '#FFFFFF', 'align': 'center', 'border': 1, 'border_color': '#D9D9D9'})
+                    
+                    # SEMÁFORO SOLICITADO
+                    f_bajo   = wb.add_format({'bg_color': '#92D050', 'font_color': 'black', 'bold': True, 'num_format': '0.0%', 'border': 1, 'align': 'right'}) # VERDE
+                    f_medio  = wb.add_format({'bg_color': '#FFFFCC', 'font_color': 'black', 'bold': True, 'num_format': '0.0%', 'border': 1, 'align': 'right'}) # AMARILLO CLARO
+                    f_alto   = wb.add_format({'bg_color': '#FFC000', 'font_color': 'black', 'bold': True, 'num_format': '0.0%', 'border': 1, 'align': 'right'}) # NARANJA
+                    f_crit   = wb.add_format({'bg_color': '#FF0000', 'font_color': 'white', 'bold': True, 'num_format': '0.0%', 'border': 1, 'align': 'right'}) # ROJO
+                    
+                    f_d_red  = wb.add_format({'font_color': '#C00000', 'bold': True, 'align': 'center', 'bg_color': '#FFFFFF'})
+                    f_d_green= wb.add_format({'font_color': '#00B050', 'bold': True, 'align': 'center', 'bg_color': '#FFFFFF'})
 
                     if modo == "Crecimiento":
-                        ws = wb.add_worksheet("Resumen_Ejecutivo")
-                        ws.set_tab_color('#1F4E78')
+                        # --- 1. PESTAÑA RESUMEN ---
+                        ws = wb.add_worksheet("RESUMEN")
+                        ws.hide_gridlines(2)
+                        ws.set_column('A:Z', 20, f_bg)
+                        ws.merge_range('A1:D2', "DASHBOARD OPERATIVO - RESUMEN DE CRECIMIENTO", f_title)
+                        
                         col_idx = 0
                         for i, h_res in enumerate(st.session_state.historico_resumen):
                             df_m = pd.DataFrame(st.session_state.analisis_cache[h_res['Mes']])
                             t = len(df_m) or 1
-                            ws.write(0, col_idx, h_res['Mes'].upper(), f_header)
-                            ws.write(1, col_idx, "📊 TRASLAPE TOTAL", f_sub)
-                            ws.write(2, col_idx, h_res['Prom']/100, f_perc)
-                            ws.write(16, col_idx, t)
-                            if i > 0:
-                                d_m = h_res['Prom'] - st.session_state.historico_resumen[i-1]['Prom']
-                                s, f = ("▲", f_d_red) if d_m > 0 else ("▼", f_d_green)
-                                ws.write(3, col_idx, f"{s} {abs(round(d_m,1))}% vs mes ant.", f)
+                            
+                            ws.write(3, col_idx, h_res['Mes'].upper(), f_header)
+                            ws.write(4, col_idx, "📊 TRASLAPE PROMEDIO", f_sub)
+                            ws.write(5, col_idx, h_res['Prom']/100, f_perc)
+                            
                             niveles = [("Bajo",0,25,f_bajo), ("Medio",25,50,f_medio), ("Alto",50,75,f_alto), ("Crítico",75,100,f_crit)]
-                            r_row = 4
+                            r_row = 7
                             for n_nom, n_min, n_max, n_fmt in niveles:
-                                count = len(df_m[df_m['Traslape'] <= 25]) if n_nom == "Bajo" else len(df_m[(df_m['Traslape'] > n_min) & (df_m['Traslape'] <= n_max)])
-                                ws.write(r_row, col_idx, f"▨ {n_nom}", f_sub); ws.write(r_row+1, col_idx, count/t, n_fmt); ws.write(r_row+2, col_idx, f"{count} VRs", wb.add_format({'font_size': 9, 'italic': True}))
-                                r_row += 3
+                                mask = (df_m['Traslape'] <= 25) if n_nom == "Bajo" else ((df_m['Traslape'] > n_min) & (df_m['Traslape'] <= n_max))
+                                subset = df_m[mask]
+                                count = len(subset)
+                                v_prom = subset['VOL'].mean() if count > 0 else 0
+                                
+                                ws.write(r_row, col_idx, f"NIVEL {n_nom.upper()}", f_sub)
+                                ws.write(r_row+1, col_idx, count/t, n_fmt)
+                                ws.write(r_row+2, col_idx, f"Vol. Prom: {int(v_prom)}", f_vol_box)
+                                r_row += 4
+                            
+                            ws.write(25, col_idx, t, wb.add_format({'hidden': True}))
                             col_idx += 1
 
-                        # Tendencia y Gráfica
-                        ws.write(0, col_idx, "TENDENCIA", f_header)
-                        lc = xlsxwriter.utility.xl_col_to_name(col_idx - 1)
-                        for ft in [2, 5, 8, 11, 14, 16]: ws.add_sparkline(ft, col_idx, {'range': f'Resumen_Ejecutivo!A{ft+1}:{lc}{ft+1}', 'type': 'line' if ft==2 else 'column', 'style': 18})
-                        bc = wb.add_chart({'type': 'column'}); lc_c = wb.add_chart({'type': 'line'})
-                        bc.add_series({'name': 'Total VRs', 'categories': ['Resumen_Ejecutivo', 0, 0, 0, col_idx - 1], 'values': ['Resumen_Ejecutivo', 16, 0, 16, col_idx - 1], 'fill': {'color': '#D9D9D9'}})
-                        lc_c.add_series({'name': 'Traslape %', 'categories': ['Resumen_Ejecutivo', 0, 0, 0, col_idx - 1], 'values': ['Resumen_Ejecutivo', 2, 0, 2, col_idx - 1], 'line': {'color': '#1F4E78', 'width': 3}, 'marker': {'type': 'circle'}, 'y2_axis': True, 'data_labels': {'value': True}})
-                        bc.combine(lc_c); bc.set_title({'name': 'CRECIMIENTO VS SALUD OPERATIVA'}); ws.insert_chart('A19', bc, {'x_scale': 1.4, 'y_scale': 1.2})
-                        ws.set_column(0, col_idx, 20)
-
-                        # Pestañas de Detalle
+                        # --- 2. PESTAÑAS DE DETALLE ---
                         for idx_m, n_h in enumerate(st.session_state.dict_hojas.keys()):
                             df_det = pd.DataFrame(st.session_state.analisis_cache[n_h])[["Zona", "VOL", "Traslape"]]
-                            prom_m = next((x['Prom'] for x in st.session_state.historico_resumen if x['Mes'] == n_h), 0)
-                            df_p = {limpiar_texto(r['Zona']): r['Traslape'] for r in st.session_state.analisis_cache[list(st.session_state.dict_hojas.keys())[idx_m-1]]} if idx_m > 0 else {}
                             
-                            def calc_v_delta(row):
+                            # Lógica Tendencia Volumen
+                            df_p_vol = {}
+                            if idx_m > 0:
+                                m_ant = list(st.session_state.dict_hojas.keys())[idx_m-1]
+                                df_p_vol = {limpiar_texto(r['Zona']): r['VOL'] for r in st.session_state.analisis_cache[m_ant]}
+                            
+                            def calc_t_vol(row):
                                 z = limpiar_texto(row['Zona'])
-                                if z in df_p:
-                                    diff = row['Traslape'] - df_p[z]
-                                    if diff > 0: return f"▲ {abs(round(diff,1))}%"
-                                    if diff < 0: return f"▼ {abs(round(diff,1))}%"
-                                    return "• 0.0%"
-                                return "-"
-                            
-                            df_det['TENDENCIA'] = df_det.apply(calc_v_delta, axis=1)
+                                if z in df_p_vol:
+                                    diff = row['VOL'] - df_p_vol[z]
+                                    return f"▲ +{int(diff)}" if diff > 0 else (f"▼ {int(diff)}" if diff < 0 else "• 0")
+                                return "NUEVO"
+
+                            df_det['TENDENCIA VOL'] = df_det.apply(calc_t_vol, axis=1)
                             df_det.rename(columns={"Zona":"VR", "VOL":"VOLUMEN", "Traslape":"% TRASLAPE"}, inplace=True)
-                            df_det = df_det[["VR", "VOLUMEN", "% TRASLAPE", "TENDENCIA"]]
-                            df_det.to_excel(wr, sheet_name=n_h[:31], index=False, startrow=2)
+                            df_det = df_det[["VR", "VOLUMEN", "TENDENCIA VOL", "% TRASLAPE"]]
+                            
+                            df_det.to_excel(wr, sheet_name=n_h[:31], index=False, startrow=3)
                             ws_d = wr.sheets[n_h[:31]]
-                            ws_d.write(0, 0, f"TRASLAPE TOTAL DEL MES ({n_h}):", f_sub); ws_d.write(0, 1, prom_m/100, f_perc)
-                            rng = f'C4:C{len(df_det)+3}'; ws_d.conditional_format(rng, {'type': 'cell', 'criteria': '<=', 'value': 25, 'format': f_bajo}); ws_d.conditional_format(rng, {'type': 'cell', 'criteria': 'between', 'minimum': 25.01, 'maximum': 50, 'format': f_medio}); ws_d.conditional_format(rng, {'type': 'cell', 'criteria': 'between', 'minimum': 50.01, 'maximum': 75, 'format': f_alto}); ws_d.conditional_format(rng, {'type': 'cell', 'criteria': '>', 'value': 75, 'format': f_crit})
-                            rng_t = f'D4:D{len(df_det)+3}'; ws_d.conditional_format(rng_t, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': f_d_red}); ws_d.conditional_format(rng_t, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': f_d_green})
-                            ws_d.freeze_panes(3, 0); ws_d.set_column(0, 0, 45); ws_d.set_column(1, 3, 15)
-                    else: pd.DataFrame(rep_coords).to_excel(wr, sheet_name="Reporte", index=False)
+                            ws_d.hide_gridlines(2)
+                            ws_d.set_column('A:A', 40); ws_d.set_column('B:D', 15)
+                            ws_d.write(1, 0, f"DETALLE MENSUAL: {n_h.upper()}", f_title)
+                            
+                            # Formato Semáforo Detalle
+                            rng = f'D5:D{len(df_det)+5}'
+                            ws_d.conditional_format(rng, {'type': 'cell', 'criteria': '<=', 'value': 25, 'format': f_bajo})
+                            ws_d.conditional_format(rng, {'type': 'cell', 'criteria': 'between', 'minimum': 25.01, 'maximum': 50, 'format': f_medio})
+                            ws_d.conditional_format(rng, {'type': 'cell', 'criteria': 'between', 'minimum': 50.01, 'maximum': 75, 'format': f_alto})
+                            ws_d.conditional_format(rng, {'type': 'cell', 'criteria': '>', 'value': 75, 'format': f_crit})
+                            
+                            # Formato Tendencia
+                            rng_t = f'C5:C{len(df_det)+5}'
+                            ws_d.conditional_format(rng_t, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': f_d_green})
+                            ws_d.conditional_format(rng_t, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': f_d_red})
+                    
+                    else: # Caso otros modos
+                        pd.DataFrame(rep_coords).to_excel(wr, sheet_name="Reporte", index=False)
+
                 c2.download_button(label="📊 Descargar Reporte Excel", data=buf.getvalue(), file_name=nombre_archivo, use_container_width=True)
